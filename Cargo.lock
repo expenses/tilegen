@@ -683,6 +683,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tilegen"
+version = "0.1.0"
+dependencies = [
+ "direction",
+ "env_logger",
+ "image",
+ "log",
+ "rand",
+ "ron",
+ "serde",
+ "structopt",
+ "wfc",
+]
+
+[[package]]
 name = "unicode-segmentation"
 version = "1.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -731,21 +746,6 @@ dependencies = [
  "rand",
  "rand_xorshift",
  "rayon",
-]
-
-[[package]]
-name = "wfcnew"
-version = "0.1.0"
-dependencies = [
- "direction",
- "env_logger",
- "image",
- "log",
- "rand",
- "ron",
- "serde",
- "structopt",
- "wfc",
 ]
 
 [[package]]

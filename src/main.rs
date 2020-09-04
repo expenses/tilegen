@@ -186,7 +186,10 @@ fn main() {
 
 	log::info!("Additions: {}, Commutive additions: {}", additions, commutative_additions);
 
+	#[cfg(features = "parallel")]
 	let retry = wfc::retry::ParNumTimes(10_000);
+	#[cfg(not(features = "parallel"))]
+	let retry = wfc::retry::NumTimes(10_000);
 
 	let pattern_table = wfc::PatternTable::from_vec(
 		tile_labels
