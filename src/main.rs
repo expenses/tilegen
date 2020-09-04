@@ -1,144 +1,254 @@
 use image::*;
 use direction::CardinalDirection as Direction;
 
-#[derive(Copy, Clone)]
-enum Image {
-    Wall, Floor, Ground, RockyGround,
-    StairsR2L,
+use std::collections::{HashMap, HashSet};
+use std::path::PathBuf;
+use structopt::StructOpt;
+
+#[derive(Clone, PartialEq, Eq, Hash, serde::Deserialize, Debug)]
+struct TileLabel {
+	label: String,
+	#[serde(default)]
+	rotation: Rotation,
 }
 
-impl Image {
-    fn from_u32(value: u32) -> Self {
-        match value {
-            0 => Self::Wall,
-            1 => Self::Floor,
-            2 => Self::Ground,
-            3 => Self::RockyGround,
-            4 => Self::StairsR2L,
-            _ => panic!()
-        }
-    }
+#[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Deserialize, Debug)]
+enum Rotation {
+	Normal,
+	Minus90,
+	Plus90,
+	Opposite,
+}
 
-    fn to_u32(self) -> u32 {
-        match self {
-            Self::Wall => 0,
-            Self::Floor => 1,
-            Self::Ground => 2,
-            Self::RockyGround => 3,
-            Self::StairsR2L => 4,
-        }
-    }
+impl Rotation {
+	fn rotate(self, direction: Direction) -> Direction {
+		match self {
+			Self::Normal => direction,
+			Self::Minus90 => direction.left90(),
+			Self::Plus90 => direction.right90(),
+			Self::Opposite => direction.opposite(),
+		}
+	}
 
-    fn coords(self) -> (u32, u32) {
-        match self {
-            Self::Wall => (1, 1),
-            Self::Floor => (2, 1),
-            Self::Ground => (3, 1),
-            Self::RockyGround => (4, 1),
+	fn apply(self, other: Self) -> Self {
+		match (self, other) {
+			(Self::Normal, other) => other,
+			(this, Self::Normal) => this,
+			(Self::Minus90, Self::Plus90) => Self::Normal,
+			(Self::Plus90, Self::Minus90) => Self::Normal,
+			(Self::Opposite, Self::Opposite) => Self::Normal,
 
-            Self::StairsR2L => (1, 2),
-        }
-    }
+			(Self::Minus90, Self::Minus90) => Self::Opposite,
+			(Self::Plus90, Self::Plus90) => Self::Opposite,
 
-    fn allowed_neighbours(self, direction: Direction) -> Vec<Image> {
-        match self {
-            this @ Self::Wall => match direction {
-                _ => vec![Self::Floor],
-            }
-            this @ Self::Floor => match direction {
-                _ => vec![Self::Wall]
-            },
-            Self::Ground => vec![Self::Wall],
-            Self::RockyGround => vec![Self::RockyGround, Self::Wall],
-            Self::StairsR2L => match direction {
-                Direction::East => vec![Self::Floor],
-                Direction::West => vec![Self::Wall],
-                Direction::North | Direction::South => vec![Self::Floor, Self::Wall],
-            }
-        }
-    }
+			(Self::Minus90, Self::Opposite) => Self::Plus90,
+			(Self::Opposite, Self::Minus90) => Self::Plus90,
+
+			(Self::Plus90, Self::Opposite) => Self::Minus90,
+			(Self::Opposite, Self::Plus90) => Self::Minus90,
+		}
+	}
+}
+
+impl Default for Rotation {
+	fn default() -> Self {
+		Self::Normal
+	}
+}
+
+#[derive(PartialEq, Eq, Hash, serde::Deserialize, Debug, Clone, Copy)]
+enum NeighbourDirection {
+	All,
+	Left,
+	Right,
+	Up,
+	Down
+}
+
+impl NeighbourDirection {
+	fn into_cardinal(self) -> &'static [Direction] {
+		match self {
+			Self::All => &[Direction::North, Direction::East, Direction::South, Direction::West],
+			Self::Left => &[Direction::West],
+			Self::Right => &[Direction::East],
+			Self::Up => &[Direction::North],
+			Self::Down => &[Direction::South],
+		}
+	}
+}
+
+#[derive(serde::Deserialize, Debug, Clone)]
+#[serde(deny_unknown_fields)]
+struct Tile {
+	#[serde(default)]
+	rotatable: bool,
+	#[serde(default)]
+	allowed_neighbours: HashMap<NeighbourDirection, HashSet<TileLabel>>,
+	weight: u32,
+	coords: (u32, u32),
+}
+
+#[derive(serde::Deserialize, Debug)]
+struct InputParams {
+	tileset_image_path: PathBuf,
+	tile_size: u32,
+	tiles: HashMap<String, Tile>,
+}
+
+#[derive(StructOpt)]
+struct Opt {
+	input_config: PathBuf,
+	//output_size: (u32, u32),
+	output_image: PathBuf,
 }
 
 fn main() {
-    let xxx = image::open("tiles.png").unwrap();
+	env_logger::init();
 
+	let opt = Opt::from_args();
 
-    let mut context = wfc::Context::new();
-    let size = wfc::Size::new_u16(10, 10);
-    let retry = wfc::retry::Forever;
+	let input: InputParams = ron::de::from_reader(std::fs::File::open(opt.input_config).unwrap()).unwrap();
 
-    let mut pattern_table = wfc::PatternTable::from_vec(
-        [Image::Wall, Image::Floor]
-            .iter()
-            .map(|image| wfc::PatternDescription {
-                weight: None,
-                allowed_neighbours: direction::CardinalDirectionTable::new_array([
-                    image.allowed_neighbours(Direction::North).iter().map(|image| image.to_u32()).collect(),
-                    image.allowed_neighbours(Direction::East).iter().map(|image| image.to_u32()).collect(),
-                    image.allowed_neighbours(Direction::South).iter().map(|image| image.to_u32()).collect(),
-                    image.allowed_neighbours(Direction::West).iter().map(|image| image.to_u32()).collect(),
-                ])
-            })
-            .collect()
-    );
+	let tiles_image = image::open(&input.tileset_image_path).unwrap();
 
-    let mut rng = rand::thread_rng();
-    let global_stats = wfc::GlobalStats::new(pattern_table);
+	let mut tile_labels = Vec::new();
 
-    let mut rb = wfc::RunOwn::new_forbid(
-        wfc::Size::new_u16(10, 10),
-        //&mut context, &mut wave,
-        &global_stats,
-        Corner,
-        &mut rng
-    );
+	for (label, tile) in input.tiles.iter() {
+		if tile.rotatable {
+			tile_labels.extend_from_slice(&[
+				TileLabel { label: label.into(), rotation: Rotation::Normal },
+				TileLabel { label: label.into(), rotation: Rotation::Minus90 },
+				TileLabel { label: label.into(), rotation: Rotation::Plus90 },
+				TileLabel { label: label.into(), rotation: Rotation::Opposite },
+			]);
+		} else {
+			tile_labels.push(TileLabel { label: label.into(), rotation: Rotation::Normal });
+		}
+	}
 
-    let wave = rb.collapse_retrying(retry, &mut rng);
+	tile_labels.sort_unstable_by_key(|label| label.label.clone());
 
-    let image = {
-        let size = wave.grid().size();
-        let mut rgba_image = image::RgbaImage::new(size.width() * 16, size.height() * 16);
-        wave.grid().enumerate().for_each(|(wfc::Coord { mut x, mut y }, cell)| {
-            x *= 16;
-            y *= 16;
+	let label_to_u32 =  |label: &TileLabel| -> u32 {
+		tile_labels.iter().enumerate().find(|(_, lb)| lb == &label).map(|(i, _)| i)
+			.unwrap_or_else(|| panic!("Could not find {:?}", label)) as u32
+	};
 
-            println!("{} {} {:?}", x, y, cell);
+	let tile_size = input.tile_size;
 
-            /*/let colour = match cell.chosen_pattern_id() {
-                Ok(pattern_id) => {
-                    *self.overlapping_patterns.pattern_top_left_value(pattern_id)
-                }
-                Err(_) => self.empty_colour,
-            };*/
-            let image = match cell.chosen_pattern_id() {
-                Ok(cell) =>  Image::from_u32(cell),
-                _ => Image::RockyGround,
-            };
-            let (coord_x, coord_y) = image.coords();
-            let image = xxx.view(coord_x * 16, coord_y * 16, 16, 16);
+	let mut map: HashMap<TileLabel, HashMap<Direction, HashSet<TileLabel>>> = HashMap::new();
 
-            image::imageops::overlay(
-                &mut rgba_image,
-                &image,
-                x as u32, y as u32,
-            )
-        });
-        DynamicImage::ImageRgba8(rgba_image)
-    };
+	let mut additions = 0;
+	let mut commutative_additions = 0;
 
-    image.save("out.png").unwrap();
-}
+	for tile in &tile_labels {
+		for (direction, neighbour_tiles) in input.tiles.get(&tile.label.to_string()).unwrap().allowed_neighbours.iter() {
+			for direction in direction.into_cardinal().iter().map(|dir| tile.rotation.rotate(*dir)) {
+				let hashset = map.entry(tile.clone())
+					.or_insert_with(HashMap::new)
+					.entry(direction)
+					.or_insert_with(HashSet::new);
 
-#[derive(Copy, Clone)]
-struct Corner;
+				for mut neighbour_tile in neighbour_tiles.clone() {
+					if input.tiles.get(&neighbour_tile.label.to_string()).unwrap().rotatable {
+						neighbour_tile.rotation = neighbour_tile.rotation.apply(tile.rotation);
+					}
+					log::info!("Adding {:?} to the {:?} of {:?}", neighbour_tile, direction, tile);
+					if hashset.insert(neighbour_tile) {
+						additions += 1;
+					}
+				}
+			}
+		}
+	}
 
-impl wfc::ForbidPattern for Corner {
-    fn forbid<W: wfc::Wrap, R: rand::Rng>(
-        &mut self, 
-        fi: &mut wfc::ForbidInterface<W>,
-        rng: &mut R,
-    ) {
-        fi.forbid_all_patterns_except(wfc::Coord::new(0, 0), Image::Wall.to_u32(), rng);
+	for tile in &tile_labels {
+		for (direction, neighbour_tiles) in input.tiles.get(&tile.label.to_string()).unwrap().allowed_neighbours.iter() {
+			for direction in direction.into_cardinal().iter().map(|dir| tile.rotation.rotate(*dir)) {
+				for mut neighbour_tile in neighbour_tiles.clone() {
+					if input.tiles.get(&neighbour_tile.label.to_string()).unwrap().rotatable {
+						neighbour_tile.rotation = neighbour_tile.rotation.apply(tile.rotation);
+					}
 
-    }
+					let added = map.entry(neighbour_tile.clone())
+						.or_insert_with(HashMap::new)
+						.entry(direction.opposite())
+						.or_insert_with(HashSet::new)
+						.insert(tile.clone());
+
+					if added {
+						log::info!("Commutatively adding {:?} to the {:?} of {:?}", tile, direction.opposite(), neighbour_tile);
+						commutative_additions += 1;
+					}
+				}
+			}
+		}
+	}
+
+	log::info!("Additions: {}, Commutive additions: {}", additions, commutative_additions);
+
+	let retry = wfc::retry::ParNumTimes(10_000);
+
+	let pattern_table = wfc::PatternTable::from_vec(
+		tile_labels
+			.iter()
+			.map(|label| (label, input.tiles.get(&label.label.to_string()).unwrap()))
+			.map(|(label, tile)| wfc::PatternDescription {
+				weight: std::num::NonZeroU32::new(tile.weight),
+				allowed_neighbours: direction::CardinalDirectionTable::new_array([
+					map.get(label).expect("north 1").get(&Direction::North).expect("north 2").iter().map(label_to_u32).collect(),
+					map.get(label).expect("east 1").get(&Direction::East).expect("east 2").iter().map(label_to_u32).collect(),
+					map.get(label).expect("south 1").get(&Direction::South).expect("south 2").iter().map(label_to_u32).collect(),
+					map.get(label).expect("west 1").get(&Direction::West).expect("west 2").iter().map(label_to_u32).collect(),
+				])
+			})
+			.collect()
+	);
+
+	for (key, value) in map.iter() {
+		log::debug!("{:?}:\n\t{:?}", key, value);
+	}
+
+	let mut rng = rand::thread_rng();
+	let global_stats = wfc::GlobalStats::new(pattern_table);
+
+	let rb = wfc::RunOwn::new(
+		wfc::Size::new_u16(100, 100),
+		&global_stats,
+		&mut rng
+	);
+
+	let wave = rb.collapse_retrying(retry, &mut rng).unwrap();
+
+	let image = {
+		let size = wave.grid().size();
+		let mut rgba_image = image::RgbaImage::new(size.width() * tile_size, size.height() * tile_size);
+		wave.grid().enumerate().for_each(|(wfc::Coord { mut x, mut y }, cell)| {
+			x *= tile_size as i32;
+			y *= tile_size as i32;
+
+			let tile = match cell.chosen_pattern_id() {
+				Ok(id) => &tile_labels[id as usize],
+				_ => panic!(),
+			};
+			let image = input.tiles.get(&tile.label).unwrap();
+			let (coord_x, coord_y) = image.coords;
+			let image = tiles_image.view(coord_x * tile_size, coord_y * tile_size, tile_size, tile_size);
+
+			let image = match tile.rotation {
+				Rotation::Normal => image.to_image(),
+				Rotation::Plus90 => image::imageops::rotate90(&image),
+				Rotation::Opposite => image::imageops::rotate180(&image),
+				Rotation::Minus90 => image::imageops::rotate270(&image)
+			};
+
+			image::imageops::overlay(
+				&mut rgba_image,
+				&image,
+				x as u32, y as u32,
+			)
+		});
+		DynamicImage::ImageRgba8(rgba_image)
+	};
+
+	image.save(opt.output_image).unwrap();
 }

@@ -1,0 +1,30 @@
+(
+	tileset_image_path: "tunnel_tiles.png",
+	tile_size: 16,
+	tiles: {
+		/*"tunnel": (
+			weight: 1,
+			coords: (1, 1),
+			rotatable: true,
+			allowed_neighbours: {
+				All: [(label: "tunnel"), (label: "tunnel", rotation: Opposite],
+				Right: [(label: "tunnel_corner"), (label: "tunnel_corner", rotation: Minus90)],
+				Left: [(label: "tunnel_corner", rotation: Plus90), (label: "tunnel_corner", rotation: Opposite)],
+				Up: [(label: "tunnel_corner"), (label: "tunnel_corner", rotation: Plus90)],
+				Down: [(label: "tunnel_corner", rotation: Minus90), (label: "tunnel_corner", rotation: Opposite)]
+			},
+		),*/
+		"tunnel_corner": (
+			weight: 1,
+			coords: (2, 1),
+			rotatable: true,
+			allowed_neighbours: {
+				All: [(label: "tunnel_corner", rotation: Opposite)],
+				Left: [(label: "tunnel_corner", rotation: Plus90)],
+				Right: [(label: "tunnel_corner", rotation: Plus90)],
+				Down: [(label: "tunnel_corner", rotation: Minus90)],
+				Up: [(label: "tunnel_corner", rotation: Minus90)]
+			},
+		),
+	},
+)
