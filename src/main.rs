@@ -4,12 +4,23 @@ use direction::CardinalDirection as Direction;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use structopt::StructOpt;
+use std::fmt;
 
-#[derive(Clone, PartialEq, Eq, Hash, serde::Deserialize, Debug)]
+#[derive(Clone, PartialEq, Eq, Hash, serde::Deserialize)]
 struct TileLabel {
 	label: String,
 	#[serde(default)]
 	rotation: Rotation,
+}
+
+impl fmt::Debug for TileLabel {
+	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if self.rotation == Rotation::Normal {
+			write!(f, "{:?}", self.label)
+		} else {
+			write!(f, "({:?}, {:?})", self.label, self.rotation)
+		}
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Deserialize, Debug)]
@@ -48,6 +59,15 @@ impl Rotation {
 			(Self::Opposite, Self::Plus90) => Self::Minus90,
 		}
 	}
+
+	fn opposite(self) -> Self {
+		match self {
+			Self::Normal => Self::Opposite,
+			Self::Plus90 => Self::Minus90,
+			Self::Opposite => Self::Normal,
+			Self::Minus90 => Self::Plus90,
+		}
+	}
 }
 
 impl Default for Rotation {
@@ -83,6 +103,8 @@ struct Tile {
 	#[serde(default)]
 	rotatable: bool,
 	#[serde(default)]
+	flippable: bool,
+	#[serde(default)]
 	allowed_neighbours: HashMap<NeighbourDirection, HashSet<TileLabel>>,
 	weight: u32,
 	coords: (u32, u32),
@@ -95,6 +117,39 @@ struct InputParams {
 	tiles: HashMap<String, Tile>,
 }
 
+impl InputParams {
+	fn allowed_neighbours<'a>(&'a self, label: &'a TileLabel) -> impl Iterator<Item=(Direction, TileLabel)> + 'a {
+		// Get the allowed neighbours for a label
+		self.tiles[&label.label.to_string()].allowed_neighbours.iter()
+			// Flat map in the case of `NeighbourDirection::All`.
+			.flat_map(move |(direction, neighbour_labels)| {
+				direction.into_cardinal().iter().map(move |dir| (dir, neighbour_labels)) 
+			})
+			// Rotate the direction by the label direction.
+			.map(move |(dir, neighbour_labels)| (label.rotation.rotate(*dir), neighbour_labels))
+			// Flatmap to neighbour labels, rotating them if the can be rotated.
+			.flat_map(move |(direction, neighbour_labels)| {
+				neighbour_labels.clone().into_iter()
+					.map(move |mut neighbour_label| {
+						if self.tiles[&neighbour_label.label.to_string()].rotatable {
+							neighbour_label.rotation = neighbour_label.rotation.apply(label.rotation);
+						}
+
+						(direction, neighbour_label)
+					})
+			})
+			.flat_map(move |(direction, neighbour_label)| {
+				if self.tiles[&neighbour_label.label.to_string()].flippable {
+					let mut opposite_neighbour_label = neighbour_label.clone();
+					opposite_neighbour_label.rotation = opposite_neighbour_label.rotation.opposite();
+					vec![(direction, neighbour_label), (direction, opposite_neighbour_label)]
+				} else {
+					vec![(direction, neighbour_label)]
+				}
+			})
+	}
+}
+
 #[derive(StructOpt)]
 struct Opt {
 	input_config: PathBuf,
@@ -102,14 +157,14 @@ struct Opt {
 	output_image: PathBuf,
 }
 
-fn main() {
+fn main() -> Result<(), anyhow::Error> {
 	env_logger::init();
 
 	let opt = Opt::from_args();
 
-	let input: InputParams = ron::de::from_reader(std::fs::File::open(opt.input_config).unwrap()).unwrap();
+	let input: InputParams = ron::de::from_reader(std::fs::File::open(opt.input_config)?)?;
 
-	let tiles_image = image::open(&input.tileset_image_path).unwrap();
+	let tileset_image = image::open(&input.tileset_image_path)?;
 
 	let mut tile_labels = Vec::new();
 
@@ -141,75 +196,51 @@ fn main() {
 	let mut commutative_additions = 0;
 
 	for tile in &tile_labels {
-		for (direction, neighbour_tiles) in input.tiles.get(&tile.label.to_string()).unwrap().allowed_neighbours.iter() {
-			for direction in direction.into_cardinal().iter().map(|dir| tile.rotation.rotate(*dir)) {
-				let hashset = map.entry(tile.clone())
-					.or_insert_with(HashMap::new)
-					.entry(direction)
-					.or_insert_with(HashSet::new);
+		for (direction, neighbour_tile) in input.allowed_neighbours(&tile) {
+			let hashset = map.entry(tile.clone())
+				.or_insert_with(HashMap::new)
+				.entry(direction)
+				.or_insert_with(HashSet::new);
 
-				for mut neighbour_tile in neighbour_tiles.clone() {
-					if input.tiles.get(&neighbour_tile.label.to_string()).unwrap().rotatable {
-						neighbour_tile.rotation = neighbour_tile.rotation.apply(tile.rotation);
-					}
-					log::info!("Adding {:?} to the {:?} of {:?}", neighbour_tile, direction, tile);
-					if hashset.insert(neighbour_tile) {
-						additions += 1;
-					}
-				}
+			log::debug!("Adding {:?} to the {:?} of {:?}", neighbour_tile, direction, tile);
+			if hashset.insert(neighbour_tile) {
+				additions += 1;
 			}
 		}
 	}
 
 	for tile in &tile_labels {
-		for (direction, neighbour_tiles) in input.tiles.get(&tile.label.to_string()).unwrap().allowed_neighbours.iter() {
-			for direction in direction.into_cardinal().iter().map(|dir| tile.rotation.rotate(*dir)) {
-				for mut neighbour_tile in neighbour_tiles.clone() {
-					if input.tiles.get(&neighbour_tile.label.to_string()).unwrap().rotatable {
-						neighbour_tile.rotation = neighbour_tile.rotation.apply(tile.rotation);
-					}
+		for (direction, neighbour_tile) in input.allowed_neighbours(&tile) {
+			let added = map.entry(neighbour_tile.clone())
+				.or_insert_with(HashMap::new)
+				.entry(direction.opposite())
+				.or_insert_with(HashSet::new)
+				.insert(tile.clone());
 
-					let added = map.entry(neighbour_tile.clone())
-						.or_insert_with(HashMap::new)
-						.entry(direction.opposite())
-						.or_insert_with(HashSet::new)
-						.insert(tile.clone());
-
-					if added {
-						log::info!("Commutatively adding {:?} to the {:?} of {:?}", tile, direction.opposite(), neighbour_tile);
-						commutative_additions += 1;
-					}
-				}
+			if added {
+				log::debug!("Commutatively adding {:?} to the {:?} of {:?}", tile, direction.opposite(), neighbour_tile);
+				commutative_additions += 1;
 			}
 		}
 	}
 
 	log::info!("Additions: {}, Commutive additions: {}", additions, commutative_additions);
 
-	#[cfg(features = "parallel")]
-	let retry = wfc::retry::ParNumTimes(10_000);
-	#[cfg(not(features = "parallel"))]
-	let retry = wfc::retry::NumTimes(10_000);
-
 	let pattern_table = wfc::PatternTable::from_vec(
 		tile_labels
 			.iter()
-			.map(|label| (label, input.tiles.get(&label.label.to_string()).unwrap()))
+			.map(|label| (label, &input.tiles[&label.label.to_string()]))
 			.map(|(label, tile)| wfc::PatternDescription {
 				weight: std::num::NonZeroU32::new(tile.weight),
 				allowed_neighbours: direction::CardinalDirectionTable::new_array([
-					map.get(label).expect("north 1").get(&Direction::North).expect("north 2").iter().map(label_to_u32).collect(),
-					map.get(label).expect("east 1").get(&Direction::East).expect("east 2").iter().map(label_to_u32).collect(),
-					map.get(label).expect("south 1").get(&Direction::South).expect("south 2").iter().map(label_to_u32).collect(),
-					map.get(label).expect("west 1").get(&Direction::West).expect("west 2").iter().map(label_to_u32).collect(),
+					map[label][&Direction::North].iter().map(label_to_u32).collect(),
+					map[label][&Direction::East].iter().map(label_to_u32).collect(),
+					map[label][&Direction::South].iter().map(label_to_u32).collect(),
+					map[label][&Direction::West].iter().map(label_to_u32).collect(),
 				])
 			})
 			.collect()
 	);
-
-	for (key, value) in map.iter() {
-		log::debug!("{:?}:\n\t{:?}", key, value);
-	}
 
 	let mut rng = rand::thread_rng();
 	let global_stats = wfc::GlobalStats::new(pattern_table);
@@ -220,38 +251,68 @@ fn main() {
 		&mut rng
 	);
 
-	let wave = rb.collapse_retrying(retry, &mut rng).unwrap();
+	#[cfg(feature = "parallel")]
+	let retry = wfc::retry::ParNumTimes(1000);
+	#[cfg(not(feature = "parallel"))]
+	let retry = wfc::retry::NumTimes(1000);
 
-	let image = {
-		let size = wave.grid().size();
-		let mut rgba_image = image::RgbaImage::new(size.width() * tile_size, size.height() * tile_size);
-		wave.grid().enumerate().for_each(|(wfc::Coord { mut x, mut y }, cell)| {
-			x *= tile_size as i32;
-			y *= tile_size as i32;
+	let wave = rb.collapse_retrying(retry, &mut rng)
+		.map_err(|wfc::PropagateError::Contradiction(c)| {
+			let west = c.west.map(|id| &tile_labels[id as usize]);
+			let north = c.north.map(|id| &tile_labels[id as usize]);
+			let south = c.south.map(|id| &tile_labels[id as usize]);
+			let east = c.east.map(|id| &tile_labels[id as usize]);
+			anyhow::anyhow!("Contradiction occurred.\nNorth: {:?}\nEast: {:?}\nSouth: {:?}\nWest: {:?}", north, east, south, west)
+		})?;
 
-			let tile = match cell.chosen_pattern_id() {
-				Ok(id) => &tile_labels[id as usize],
-				_ => panic!(),
-			};
-			let image = input.tiles.get(&tile.label).unwrap();
-			let (coord_x, coord_y) = image.coords;
-			let image = tiles_image.view(coord_x * tile_size, coord_y * tile_size, tile_size, tile_size);
+	let image = wave_to_image(
+		wave, tile_size, &tile_labels, &tileset_image,
+		|label| input.tiles[label].coords,
+	);
 
-			let image = match tile.rotation {
-				Rotation::Normal => image.to_image(),
-				Rotation::Plus90 => image::imageops::rotate90(&image),
-				Rotation::Opposite => image::imageops::rotate180(&image),
-				Rotation::Minus90 => image::imageops::rotate270(&image)
-			};
+	image.save(opt.output_image)?;
+	Ok(())
+}
 
-			image::imageops::overlay(
-				&mut rgba_image,
-				&image,
-				x as u32, y as u32,
-			)
-		});
-		DynamicImage::ImageRgba8(rgba_image)
-	};
+fn wave_to_image(
+	wave: wfc::Wave,
+	tile_size: u32,
+	tile_labels: &[TileLabel],
+	tileset_image: &DynamicImage,
+	coords: impl Fn(&str) -> (u32, u32),
+) -> DynamicImage {
+	let size = wave.grid().size();
+	let mut rgba_image = image::RgbaImage::new(size.width() * tile_size, size.height() * tile_size);
+	wave.grid().enumerate().for_each(|(wfc::Coord { x, y }, cell)| {
+		let ((coord_x, coord_y), rotation) = match cell.chosen_pattern_id() {
+			Ok(id) => {
+				let tile = &tile_labels[id as usize];
+				(coords(&tile.label), tile.rotation)
+			},
+			Err(wfc::ChosenPatternIdError::MultipleCompatiblePatterns(ids)) => {
+				let tile = &tile_labels[ids[0] as usize];
+				log::debug!("Got multiple patterns at ({}, {}): {:?}", x, y, ids.into_iter().map(|id| &tile_labels[id as usize]).collect::<Vec<_>>());
+				(coords(&tile.label), tile.rotation)
+			},
+			_ => unreachable!()
+		};
+		let image = tileset_image.view(coord_x * tile_size, coord_y * tile_size, tile_size, tile_size);
 
-	image.save(opt.output_image).unwrap();
+		let image = match rotation {
+			Rotation::Normal => image.to_image(),
+			Rotation::Plus90 => image::imageops::rotate90(&image),
+			Rotation::Opposite => image::imageops::rotate180(&image),
+			Rotation::Minus90 => image::imageops::rotate270(&image)
+		};
+
+		let image_x = x * tile_size as i32;
+		let image_y = y * tile_size as i32;
+
+		image::imageops::overlay(
+			&mut rgba_image,
+			&image,
+			image_x as u32, image_y as u32,
+		)
+	});
+	DynamicImage::ImageRgba8(rgba_image)
 }

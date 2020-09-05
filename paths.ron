@@ -1,0 +1,166 @@
+(
+	tileset_image_path: "path_tiles.png",
+	tile_size: 16,
+	tiles: {
+		"grass": (
+			weight: 500,
+			coords: (0, 0),
+			allowed_neighbours: {
+				All: [(label: "grass")],
+			},
+		),
+		"path": (
+			weight: 50,
+			coords: (1, 0),
+			rotatable: true,
+			flippable: true,
+			allowed_neighbours: {
+				Up: [(label: "path")],
+				Down: [(label: "path")],
+				Left: [(label: "grass")],
+				Right: [(label: "grass")]
+			}
+		),
+		"river": (
+			weight: 100,
+			coords: (2, 0),
+			rotatable: true,
+			flippable: true,
+			allowed_neighbours: {
+				Up: [(label: "river")],
+				Down: [(label: "river")],
+				Left: [(label: "grass")],
+				Right: [(label: "grass")]
+			}
+		),
+		"bridge": (
+			weight: 50,
+			coords: (3, 0),
+			rotatable: true,
+			allowed_neighbours: {
+				Up: [(label: "path")],
+				Down: [(label: "path")],
+				Left: [(label: "river", rotation: Plus90)],
+				Right: [(label: "river", rotation: Plus90)]
+			}
+		),
+		"crossroads": (
+			weight: 25,
+			coords: (0, 1),
+			allowed_neighbours: {
+				Up: [(label: "path")],
+				Down: [(label: "path")],
+				Left: [(label: "path", rotation: Plus90)],
+				Right: [(label: "path", rotation: Plus90)]
+			}
+		),
+		"river_bend": (
+			weight: 10,
+			coords: (1, 1),
+			rotatable: true,
+			allowed_neighbours: {
+				Up: [(label: "grass")],
+				Left: [(label: "grass")],
+				Down: [(label: "river"), (label: "river", rotation: Opposite)],
+				Right: [(label: "river", rotation: Plus90), (label: "river", rotation: Minus90)]
+			}
+		),
+		"river_split": (
+			weight: 0,
+			coords: (0, 2),
+			rotatable: true,
+			allowed_neighbours: {
+				Left: [(label: "grass")],
+				Up: [(label: "river")],
+				Down: [(label: "river")],
+				Right: [(label: "river", rotation: Plus90)],
+			}
+		),
+		"path_bend": (
+			weight: 5,
+			coords: (2, 1),
+			rotatable: true,
+			allowed_neighbours: {
+				Up: [(label: "grass")],
+				Left: [(label: "grass")],
+				Down: [(label: "path"), (label: "path", rotation: Opposite)],
+				Right: [(label: "path", rotation: Plus90), (label: "path", rotation: Minus90)]
+			}
+		),
+		"tree": (
+			weight: 25,
+			coords: (1, 2),
+			allowed_neighbours: {
+				All: [(label: "grass")]
+			}
+		),
+		"city_ground": (
+			weight: 50,
+			coords: (2, 2),
+			allowed_neighbours: {
+				All: [(label: "city_ground")]
+			}
+		),
+		"city_wall": (
+			weight: 50,
+			coords: (0, 3),
+			rotatable: true,
+			allowed_neighbours: {
+				Left: [(label: "city_wall"), (label: "city_wall_corner", rotation: Minus90)],
+				Up: [(label: "grass")],
+				Down: [(label: "city_ground")],
+				Right: [(label: "city_wall"), (label: "city_wall_corner")],
+			}
+		),
+		"city_wall_corner": (
+			weight: 5,
+			coords: (1, 3),
+			rotatable: true,
+			allowed_neighbours: {
+				Up: [(label: "grass")],
+				Right: [(label: "grass")],
+				Down: [(label: "city_wall", rotation: Plus90)]
+			}
+		),
+		"city_wall_inner_corner": (
+			weight: 1,
+			coords: (2, 3),
+			rotatable: true,
+			allowed_neighbours: {
+				Up: [(label: "city_wall", rotation: Plus90)],
+				Right: [(label: "city_wall")],
+				Left: [(label: "city_ground")],
+				Down: [(label: "city_ground")],
+			}
+		),
+		"house": (
+			weight: 10,
+			coords: (3, 2),
+			allowed_neighbours: {
+				All: [(label: "city_ground")]
+			}
+		),
+		"city_wall_with_river": (
+			weight: 1,
+			coords: (4, 0),
+			rotatable: true,
+			allowed_neighbours: {
+				Up: [(label: "river")],
+				Left: [(label: "city_wall")],
+				Right: [(label: "city_wall")],
+				Down: [(label: "city_ground")]
+			}
+		),
+		"city_wall_with_path": (
+			weight: 1,
+			coords: (5, 0),
+			rotatable: true,
+			allowed_neighbours: {
+				Up: [(label: "path")],
+				Left: [(label: "city_wall")],
+				Right: [(label: "city_wall")],
+				Down: [(label: "city_ground")]
+			}
+		),
+	},
+)

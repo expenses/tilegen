@@ -7,7 +7,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-wfc = { version = "0.9.1" }
+wfc = { git = "https://github.com/expenses/wfc", branch = "easier-debugging" }
 image = "0.23.9"
 direction = "0.17.10"
 rand = "0.7.3"
@@ -16,6 +16,7 @@ ron = "0.6.1"
 env_logger = "0.7.1"
 log = "0.4.11"
 structopt = "0.3.17"
+anyhow = "1.0.32"
 
 [features]
 default = ["parallel"]

@@ -31,6 +31,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "anyhow"
+version = "1.0.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6b602bfe940d21c130f3895acd65221e8a61270debe89d628b9cb4e3ccb8569b"
+
+[[package]]
 name = "atty"
 version = "0.2.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -686,6 +692,7 @@ dependencies = [
 name = "tilegen"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "direction",
  "env_logger",
  "image",
@@ -736,8 +743,7 @@ checksum = "cccddf32554fecc6acb585f82a32a72e28b48f8c4c1883ddfeeeaa96f7d8e519"
 [[package]]
 name = "wfc"
 version = "0.9.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "574422438f033e67bfea6ac0a320d3fad67c914f65ce7ae0622766a7424a6baf"
+source = "git+https://github.com/expenses/wfc?branch=easier-debugging#e29d69181956e67b378ed12ab98bc827884c6a58"
 dependencies = [
  "coord_2d",
  "direction",
