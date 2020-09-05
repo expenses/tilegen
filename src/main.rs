@@ -150,10 +150,29 @@ impl InputParams {
 	}
 }
 
+struct OutputSize {
+	width: u16,
+	height: u16,
+}
+
+impl std::str::FromStr for OutputSize {
+	type Err = String;
+
+	fn from_str(string: &str) -> Result<Self, Self::Err> {
+		let index = string.find("x").ok_or_else(|| "Missing 'x' seperator")?;
+		let width = string[..index].parse::<u16>().map_err(|err| err.to_string())?;
+		let height = string[index+1..].parse::<u16>().map_err(|err| err.to_string())?;
+		Ok(Self { width, height })
+	}
+}
+
 #[derive(StructOpt)]
 struct Opt {
 	input_config: PathBuf,
-	//output_size: (u32, u32),
+	#[structopt(short, long, default_value = "50x50")]
+	output_size: OutputSize,
+	#[structopt(short, long, default_value = "1000")]
+	iterations: usize,
 	output_image: PathBuf,
 }
 
@@ -246,15 +265,15 @@ fn main() -> Result<(), anyhow::Error> {
 	let global_stats = wfc::GlobalStats::new(pattern_table);
 
 	let rb = wfc::RunOwn::new(
-		wfc::Size::new_u16(100, 100),
+		wfc::Size::new_u16(opt.output_size.width, opt.output_size.height),
 		&global_stats,
 		&mut rng
 	);
 
 	#[cfg(feature = "parallel")]
-	let retry = wfc::retry::ParNumTimes(1000);
+	let retry = wfc::retry::ParNumTimes(opt.iterations);
 	#[cfg(not(feature = "parallel"))]
-	let retry = wfc::retry::NumTimes(1000);
+	let retry = wfc::retry::NumTimes(opt.iterations);
 
 	let wave = rb.collapse_retrying(retry, &mut rng)
 		.map_err(|wfc::PropagateError::Contradiction(c)| {

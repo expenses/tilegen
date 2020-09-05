@@ -45,7 +45,7 @@
 			}
 		),
 		"crossroads": (
-			weight: 25,
+			weight: 5,
 			coords: (0, 1),
 			allowed_neighbours: {
 				Up: [(label: "path")],
@@ -61,8 +61,8 @@
 			allowed_neighbours: {
 				Up: [(label: "grass")],
 				Left: [(label: "grass")],
-				Down: [(label: "river"), (label: "river", rotation: Opposite)],
-				Right: [(label: "river", rotation: Plus90), (label: "river", rotation: Minus90)]
+				Down: [(label: "river")],
+				Right: [(label: "river", rotation: Plus90)]
 			}
 		),
 		"river_split": (
@@ -83,12 +83,12 @@
 			allowed_neighbours: {
 				Up: [(label: "grass")],
 				Left: [(label: "grass")],
-				Down: [(label: "path"), (label: "path", rotation: Opposite)],
-				Right: [(label: "path", rotation: Plus90), (label: "path", rotation: Minus90)]
+				Down: [(label: "path")],
+				Right: [(label: "path", rotation: Plus90)]
 			}
 		),
 		"tree": (
-			weight: 25,
+			weight: 50,
 			coords: (1, 2),
 			allowed_neighbours: {
 				All: [(label: "grass")]
