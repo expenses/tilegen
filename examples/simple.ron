@@ -1,19 +1,19 @@
 (
-    // The relative path of the tileset image that this config uses.
+	// The relative path of the tileset image that this config uses.
 	tileset_image_path: "rivers_and_roads.png",
-    // The size of an tile in the tileset. Here it's 16 pixels by 16 pixels.
+	// The size of an tile in the tileset. Here it's 16 pixels by 16 pixels.
 	tile_size: 16,
-    // A hashmap of tile ID strings to their configurations.
+	// A hashmap of tile ID strings to their configurations.
 	tiles: {
 		"grass": (
-            // All tiles in this example have a 'weight' of 1, meaning that they're equally as
-            // likely to occur as each other.
+			// All tiles in this example have a 'weight' of 1, meaning that they're equally as
+			// likely to occur as each other.
 			weight: 1,
-            // The location of the tile in the tileset, from the top-left. 
+			// The location of the tile in the tileset, from the top-left.
 			coords: (0, 0),
 			allowed_neighbours: {
-                // Here we say that this grass tile is allowed to neighbour with grass tiles in all
-                // directions.
+				// Here we say that this grass tile is allowed to neighbour with grass tiles in all
+				// directions.
 				All: [(label: "grass")],
 			},
 		),
@@ -21,8 +21,8 @@
 			weight: 1,
 			coords: (1, 2),
 			allowed_neighbours: {
-                // This tree tile can neighbour with grass tiles, but not other tree tiles. Note
-                // that this commutatively applies the same rule to the grass tile.
+				// This tree tile can neighbour with grass tiles, but not other tree tiles. Note
+				// that this commutatively applies the same rule to the grass tile.
 				All: [(label: "grass")]
 			}
 		),
@@ -30,7 +30,7 @@
 			weight: 1,
 			coords: (5, 1),
 			allowed_neighbours: {
-                // This hill tile can neighbour with grass tiles and other hill tiles.
+				// This hill tile can neighbour with grass tiles and other hill tiles.
 				All: [(label: "grass"), (label: "hills")]
 			}
 		),

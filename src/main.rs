@@ -7,24 +7,36 @@ use structopt::StructOpt;
 use std::fmt;
 use std::num::{NonZeroU16, NonZeroUsize, NonZeroU32};
 
-#[derive(Clone, PartialEq, Eq, Hash, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, serde::Deserialize, PartialOrd, Ord)]
 struct TileLabel {
 	label: String,
 	#[serde(default)]
 	rotation: Rotation,
+	#[serde(default)]
+	subsection: (u32, u32),
+}
+
+impl TileLabel {
+	fn new(label: &str, rotation: Rotation, subsection: (u32, u32)) -> Self {
+		Self {
+			label: label.to_string(),
+			rotation, subsection,
+		}
+	}
 }
 
 impl fmt::Debug for TileLabel {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.rotation == Rotation::Normal {
-			write!(f, "{:?}", self.label)
-		} else {
-			write!(f, "({:?}, {:?})", self.label, self.rotation)
+		match (self.rotation, self.subsection) {
+			(Rotation::Normal, (0, 0)) => write!(f, "{:?}", self.label),
+			(Rotation::Normal, _) => write!(f, "({:?}, {:?})", self.label, self.subsection),
+			(_, (0, 0)) => write!(f, "({:?}, {:?})", self.label, self.rotation),
+			_ => write!(f, "({:?}, {:?}, {:?})", self.label, self.rotation, self.subsection)
 		}
-    }
+	}
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Deserialize, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Deserialize, Debug, PartialOrd, Ord)]
 enum Rotation {
 	Normal,
 	Minus90,
@@ -104,9 +116,20 @@ struct Tile {
 	#[serde(default)]
 	rotatable: Rotatable,
 	#[serde(default)]
-	allowed_neighbours: HashMap<NeighbourDirection, HashSet<TileLabel>>,
+	allowed_neighbours: HashMap<NeighbourDirection, Vec<TileLabel>>,
 	weight: u32,
 	coords: (u32, u32),
+	#[serde(default)]
+	dimensions: Dimensions,
+}
+
+#[derive(serde::Deserialize, Debug, Clone)]
+struct Dimensions(u32, u32);
+
+impl Default for Dimensions {
+	fn default() -> Self {
+		Self(1, 1)
+	}
 }
 
 #[derive(serde::Deserialize, Debug)]
@@ -124,25 +147,43 @@ impl InputParams {
 		self.tiles[&label.label.to_string()].allowed_neighbours.iter()
 			// Flat map in the case of `NeighbourDirection::All`.
 			.flat_map(move |(direction, neighbour_labels)| {
-				direction.into_cardinal().iter().map(move |dir| (dir, neighbour_labels)) 
+				direction.into_cardinal().iter().map(move |dir| (dir, neighbour_labels.clone()))
+			})
+			// Rewrite the neighbours of multi-sized tiles.
+			.map(move |(direction, neighbour_labels)| {
+				let Dimensions(width, height) = self.tiles[&label.label.to_string()].dimensions;
+
+				match (direction, label.subsection, label.subsection.0 == width - 1, label.subsection.1 == height - 1) {
+					// No change
+					(Direction::North, (_, 0), _, _) | (Direction::West, (0, _), _, _) |
+					(Direction::East, _, true, _) | (Direction::South, _, _, true) => (direction, neighbour_labels),
+
+					(Direction::North, (x, y), _, _) => (direction, vec![TileLabel::new(&label.label, Rotation::Normal, (x, y - 1))]),
+					(Direction::South, (x, y), _, _) => (direction, vec![TileLabel::new(&label.label, Rotation::Normal, (x, y + 1))]),
+					(Direction::West, (x, y), _, _) => (direction, vec![TileLabel::new(&label.label, Rotation::Normal, (x - 1, y))]),
+					(Direction::East, (x, y), _, _) => (direction, vec![TileLabel::new(&label.label, Rotation::Normal, (x + 1, y))]),
+				}
 			})
 			// Rotate the direction by the label direction.
 			.map(move |(dir, neighbour_labels)| (label.rotation.rotate(*dir), neighbour_labels))
-			// Flatmap to neighbour labels, rotating them if the can be rotated.
+			// Flatmap to neighbour labels
 			.flat_map(move |(direction, neighbour_labels)| {
 				neighbour_labels.clone().into_iter()
-					.map(move |mut neighbour_label| {
-						match self.tiles[&neighbour_label.label.to_string()].rotatable {
-							Rotatable::Yes { .. } => {
-								neighbour_label.rotation =
-									neighbour_label.rotation.apply(label.rotation);
-							},
-							_ => {}
-						}
-
-						(direction, neighbour_label)
-					})
+					.map(move |neighbour_label| (direction, neighbour_label))
 			})
+			// Rotating neighbour labels if the can be rotated.
+			.map(move |(direction, mut neighbour_label)| {
+				match self.tiles[&neighbour_label.label.to_string()].rotatable {
+					Rotatable::Yes { .. } => {
+						neighbour_label.rotation =
+							neighbour_label.rotation.apply(label.rotation);
+					},
+					_ => {}
+				}
+
+				(direction, neighbour_label)
+			})
+			// Apply symmetry.
 			.flat_map(move |(direction, neighbour_label)| {
 				match self.tiles[&neighbour_label.label.to_string()].rotatable {
 					Rotatable::Yes { symmetry: Symmetry::I } => {
@@ -196,12 +237,12 @@ impl std::str::FromStr for OutputSize {
 struct Opt {
 	#[structopt(help = "The input configuration file")]
 	input_config: PathBuf,
+	#[structopt(help = "The output image file")]
+	output_image: PathBuf,
 	#[structopt(short, long, default_value = "50x50", help = "The size of the output image")]
 	output_size: OutputSize,
 	#[structopt(short, long, default_value = "1000", help = "The number of times to try and make a valid tilemap")]
 	attempts: NonZeroUsize,
-	#[structopt(help = "The output image file")]
-	output_image: PathBuf,
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -223,22 +264,31 @@ fn main() -> Result<(), anyhow::Error> {
 	let tileset_image = image::open(&tileset_image_path)
 		.map_err(|err| anyhow::anyhow!("Could not open '{}': {}", tileset_image_path.display(), err))?;
 
-	let mut tile_labels = Vec::new();
+	// Generate all possible tile labels.
+	let mut tile_labels: Vec<TileLabel> = input.tiles.iter()
+		.flat_map(|(label, tile)| {
+			if let Rotatable::Yes { .. } = tile.rotatable {
+				vec![
+					(label, tile, Rotation::Normal),
+					(label, tile, Rotation::Minus90),
+					(label, tile, Rotation::Plus90),
+					(label, tile, Rotation::Opposite),
+				]
+			} else {
+				vec![(label, tile, Rotation::Normal)]
+			}
+		})
+		.flat_map(|(label, tile, rotation)| {
+			let Dimensions(width, height) = tile.dimensions;
 
-	for (label, tile) in input.tiles.iter() {
-		if let Rotatable::Yes { .. } = tile.rotatable {
-			tile_labels.extend_from_slice(&[
-				TileLabel { label: label.into(), rotation: Rotation::Normal },
-				TileLabel { label: label.into(), rotation: Rotation::Minus90 },
-				TileLabel { label: label.into(), rotation: Rotation::Plus90 },
-				TileLabel { label: label.into(), rotation: Rotation::Opposite },
-			]);
-		} else {
-			tile_labels.push(TileLabel { label: label.into(), rotation: Rotation::Normal });
-		}
-	}
+			(0 .. width)
+				.flat_map(move |x| (0 .. height).map(move |y| (x, y)))
+				.map(move |(x, y)| (label, rotation, (x, y)))
+		})
+		.map(|(label, rotation, subsection)| TileLabel { label: label.into(), rotation, subsection})
+		.collect();
 
-	tile_labels.sort_unstable_by_key(|label| label.label.clone());
+	tile_labels.sort_unstable();
 
 	let label_to_u32 =  |label: &TileLabel| -> u32 {
 		tile_labels.iter().enumerate().find(|(_, lb)| lb == &label).map(|(i, _)| i)
@@ -338,7 +388,11 @@ fn main() -> Result<(), anyhow::Error> {
 
 	let image = wave_to_image(
 		wave, tile_size, &tile_labels, &tileset_image,
-		|label| input.tiles[label].coords,
+		|label| {
+			let (x, y) = input.tiles[&label.label].coords;
+			let (sub_x, sub_y) = label.subsection;
+			(x + sub_x, y + sub_y)
+		},
 	);
 
 	image.save(opt.output_image)?;
@@ -350,7 +404,7 @@ fn wave_to_image(
 	tile_size: u32,
 	tile_labels: &[TileLabel],
 	tileset_image: &DynamicImage,
-	coords: impl Fn(&str) -> (u32, u32),
+	coords: impl Fn(&TileLabel) -> (u32, u32),
 ) -> DynamicImage {
 	let size = wave.grid().size();
 	let mut rgba_image = image::RgbaImage::new(size.width() * tile_size, size.height() * tile_size);
@@ -358,7 +412,7 @@ fn wave_to_image(
 		let ((coord_x, coord_y), rotation) = match cell.chosen_pattern_id() {
 			Ok(id) => {
 				let tile = &tile_labels[id as usize];
-				(coords(&tile.label), tile.rotation)
+				(coords(&tile), tile.rotation)
 			},
 			Err(wfc::ChosenPatternIdError::MultipleCompatiblePatterns(ids)) => {
 				let tile = &tile_labels[ids[0] as usize];
@@ -366,7 +420,7 @@ fn wave_to_image(
 					"Got multiple patterns at ({}, {}): {:?}",
 					x, y, ids.into_iter().map(|id| &tile_labels[id as usize]).collect::<Vec<_>>(),
 				);
-				(coords(&tile.label), tile.rotation)
+				(coords(&tile), tile.rotation)
 			},
 			_ => unreachable!()
 		};
