@@ -101,9 +101,7 @@ impl NeighbourDirection {
 #[serde(deny_unknown_fields)]
 struct Tile {
 	#[serde(default)]
-	rotatable: bool,
-	#[serde(default)]
-	flippable: bool,
+	rotatable: Rotatable,
 	#[serde(default)]
 	allowed_neighbours: HashMap<NeighbourDirection, HashSet<TileLabel>>,
 	weight: u32,
@@ -131,7 +129,7 @@ impl InputParams {
 			.flat_map(move |(direction, neighbour_labels)| {
 				neighbour_labels.clone().into_iter()
 					.map(move |mut neighbour_label| {
-						if self.tiles[&neighbour_label.label.to_string()].rotatable {
+						if let Rotatable::Yes { .. } = self.tiles[&neighbour_label.label.to_string()].rotatable {
 							neighbour_label.rotation = neighbour_label.rotation.apply(label.rotation);
 						}
 
@@ -139,7 +137,7 @@ impl InputParams {
 					})
 			})
 			.flat_map(move |(direction, neighbour_label)| {
-				if self.tiles[&neighbour_label.label.to_string()].flippable {
+				if let Rotatable::Yes { symmetry: Symmetry::I } = self.tiles[&neighbour_label.label.to_string()].rotatable {
 					let mut opposite_neighbour_label = neighbour_label.clone();
 					opposite_neighbour_label.rotation = opposite_neighbour_label.rotation.opposite();
 					vec![(direction, neighbour_label), (direction, opposite_neighbour_label)]
@@ -148,6 +146,24 @@ impl InputParams {
 				}
 			})
 	}
+}
+
+#[derive(serde::Deserialize, Debug, Clone)]
+enum Rotatable {
+	Yes { symmetry: Symmetry },
+	No
+}
+
+impl Default for Rotatable {
+	fn default() -> Self {
+		Self::No
+	}
+}
+
+#[derive(serde::Deserialize, Debug, Clone)]
+enum Symmetry {
+	None,
+	I,
 }
 
 struct OutputSize {
@@ -188,7 +204,7 @@ fn main() -> Result<(), anyhow::Error> {
 	let mut tile_labels = Vec::new();
 
 	for (label, tile) in input.tiles.iter() {
-		if tile.rotatable {
+		if let Rotatable::Yes { .. } = tile.rotatable {
 			tile_labels.extend_from_slice(&[
 				TileLabel { label: label.into(), rotation: Rotation::Normal },
 				TileLabel { label: label.into(), rotation: Rotation::Minus90 },

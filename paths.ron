@@ -12,8 +12,7 @@
 		"path": (
 			weight: 50,
 			coords: (1, 0),
-			rotatable: true,
-			flippable: true,
+			rotatable: Yes(symmetry: I),
 			allowed_neighbours: {
 				Up: [(label: "path")],
 				Down: [(label: "path")],
@@ -24,8 +23,7 @@
 		"river": (
 			weight: 100,
 			coords: (2, 0),
-			rotatable: true,
-			flippable: true,
+			rotatable: Yes(symmetry: I),
 			allowed_neighbours: {
 				Up: [(label: "river")],
 				Down: [(label: "river")],
@@ -36,7 +34,7 @@
 		"bridge": (
 			weight: 50,
 			coords: (3, 0),
-			rotatable: true,
+			rotatable: Yes(symmetry: I),
 			allowed_neighbours: {
 				Up: [(label: "path")],
 				Down: [(label: "path")],
@@ -57,7 +55,7 @@
 		"river_bend": (
 			weight: 10,
 			coords: (1, 1),
-			rotatable: true,
+			rotatable: Yes(symmetry: None),
 			allowed_neighbours: {
 				Up: [(label: "grass")],
 				Left: [(label: "grass")],
@@ -68,7 +66,7 @@
 		"river_split": (
 			weight: 0,
 			coords: (0, 2),
-			rotatable: true,
+			rotatable: Yes(symmetry: None),
 			allowed_neighbours: {
 				Left: [(label: "grass")],
 				Up: [(label: "river")],
@@ -79,7 +77,7 @@
 		"path_bend": (
 			weight: 5,
 			coords: (2, 1),
-			rotatable: true,
+			rotatable: Yes(symmetry: None),
 			allowed_neighbours: {
 				Up: [(label: "grass")],
 				Left: [(label: "grass")],
@@ -104,7 +102,7 @@
 		"city_wall": (
 			weight: 50,
 			coords: (0, 3),
-			rotatable: true,
+			rotatable: Yes(symmetry: None),
 			allowed_neighbours: {
 				Left: [(label: "city_wall"), (label: "city_wall_corner", rotation: Minus90)],
 				Up: [(label: "grass")],
@@ -115,7 +113,7 @@
 		"city_wall_corner": (
 			weight: 5,
 			coords: (1, 3),
-			rotatable: true,
+			rotatable: Yes(symmetry: None),
 			allowed_neighbours: {
 				Up: [(label: "grass")],
 				Right: [(label: "grass")],
@@ -125,7 +123,7 @@
 		"city_wall_inner_corner": (
 			weight: 1,
 			coords: (2, 3),
-			rotatable: true,
+			rotatable: Yes(symmetry: None),
 			allowed_neighbours: {
 				Up: [(label: "city_wall", rotation: Plus90)],
 				Right: [(label: "city_wall")],
@@ -143,7 +141,7 @@
 		"city_wall_with_river": (
 			weight: 1,
 			coords: (4, 0),
-			rotatable: true,
+			rotatable: Yes(symmetry: None),
 			allowed_neighbours: {
 				Up: [(label: "river")],
 				Left: [(label: "city_wall")],
@@ -154,7 +152,7 @@
 		"city_wall_with_path": (
 			weight: 1,
 			coords: (5, 0),
-			rotatable: true,
+			rotatable: Yes(symmetry: None),
 			allowed_neighbours: {
 				Up: [(label: "path")],
 				Left: [(label: "city_wall")],
@@ -162,5 +160,37 @@
 				Down: [(label: "city_ground")]
 			}
 		),
+		"hills": (
+			weight: 25,
+			coords: (5, 1),
+			allowed_neighbours: {
+				All: [(label: "grass"), (label: "hills")]
+			}
+		),
+		"mountains": (
+			weight: 25,
+			coords: (6, 1),
+			allowed_neighbours: {
+				All: [(label: "hills"), (label: "mountains")]
+			}
+		),
+		"snowy_mountains": (
+			weight: 250,
+			coords: (7, 1),
+			allowed_neighbours: {
+				All: [(label: "mountains")]
+			}
+		)
+		/*"cottage": (
+			weight: 0,
+			coords: (4, 1),
+			rotatable: true,
+			allowed_neighbours: {
+				Down: [(label: "path")],
+				Left: [(label: "grass")],
+				Right: [(label: "grass")],
+				Up: [(label: "grass")],
+			}
+		)*/
 	},
 )
