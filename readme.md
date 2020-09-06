@@ -25,7 +25,7 @@ ARGS:
 
 `tilegen` takes a [Rust Object Notation](https://github.com/ron-rs/ron) configuration file as input.
 This file sets up the rendering infomation and neighbour rules between tiles. Here's what
-[examples/simple.ron]() looks like:
+[examples/simple.ron](examples/simple.ron) looks like:
 
 ```rust
 (
@@ -77,6 +77,6 @@ You should end up with something like this:
 
 ![](readme/simple_generated.png)
 
-A more complex example can be found in [examples/rivers_and_roads.ron]():
+A more complex example can be found in [examples/rivers_and_roads.ron](examples/rivers_and_roads.ron):
 
 ![](readme/rivers_and_roads_generated.png)
