@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use structopt::StructOpt;
 use std::fmt;
+use std::num::{NonZeroU16, NonZeroUsize, NonZeroU32};
 
 #[derive(Clone, PartialEq, Eq, Hash, serde::Deserialize)]
 struct TileLabel {
@@ -116,7 +117,9 @@ struct InputParams {
 }
 
 impl InputParams {
-	fn allowed_neighbours<'a>(&'a self, label: &'a TileLabel) -> impl Iterator<Item=(Direction, TileLabel)> + 'a {
+	fn allowed_neighbours<'a>(&'a self, label: &'a TileLabel)
+		-> impl Iterator<Item=(Direction, TileLabel)> + 'a
+	{
 		// Get the allowed neighbours for a label
 		self.tiles[&label.label.to_string()].allowed_neighbours.iter()
 			// Flat map in the case of `NeighbourDirection::All`.
@@ -129,20 +132,27 @@ impl InputParams {
 			.flat_map(move |(direction, neighbour_labels)| {
 				neighbour_labels.clone().into_iter()
 					.map(move |mut neighbour_label| {
-						if let Rotatable::Yes { .. } = self.tiles[&neighbour_label.label.to_string()].rotatable {
-							neighbour_label.rotation = neighbour_label.rotation.apply(label.rotation);
+						match self.tiles[&neighbour_label.label.to_string()].rotatable {
+							Rotatable::Yes { .. } => {
+								neighbour_label.rotation =
+									neighbour_label.rotation.apply(label.rotation);
+							},
+							_ => {}
 						}
 
 						(direction, neighbour_label)
 					})
 			})
 			.flat_map(move |(direction, neighbour_label)| {
-				if let Rotatable::Yes { symmetry: Symmetry::I } = self.tiles[&neighbour_label.label.to_string()].rotatable {
-					let mut opposite_neighbour_label = neighbour_label.clone();
-					opposite_neighbour_label.rotation = opposite_neighbour_label.rotation.opposite();
-					vec![(direction, neighbour_label), (direction, opposite_neighbour_label)]
-				} else {
-					vec![(direction, neighbour_label)]
+				match self.tiles[&neighbour_label.label.to_string()].rotatable {
+					Rotatable::Yes { symmetry: Symmetry::I } => {
+						let mut opposite_neighbour_label = neighbour_label.clone();
+						opposite_neighbour_label.rotation = opposite_neighbour_label.rotation.opposite();
+						vec![(direction, neighbour_label), (direction, opposite_neighbour_label)]
+					},
+					Rotatable::Yes { symmetry: Symmetry::None } | Rotatable::No => {
+						vec![(direction, neighbour_label)]
+					},
 				}
 			})
 	}
@@ -167,8 +177,8 @@ enum Symmetry {
 }
 
 struct OutputSize {
-	width: u16,
-	height: u16,
+	width: NonZeroU16,
+	height: NonZeroU16,
 }
 
 impl std::str::FromStr for OutputSize {
@@ -176,19 +186,21 @@ impl std::str::FromStr for OutputSize {
 
 	fn from_str(string: &str) -> Result<Self, Self::Err> {
 		let index = string.find("x").ok_or_else(|| "Missing 'x' seperator")?;
-		let width = string[..index].parse::<u16>().map_err(|err| err.to_string())?;
-		let height = string[index+1..].parse::<u16>().map_err(|err| err.to_string())?;
+		let width = string[..index].parse::<NonZeroU16>().map_err(|err| err.to_string())?;
+		let height = string[index+1..].parse::<NonZeroU16>().map_err(|err| err.to_string())?;
 		Ok(Self { width, height })
 	}
 }
 
 #[derive(StructOpt)]
 struct Opt {
+	#[structopt(help = "The input configuration file")]
 	input_config: PathBuf,
-	#[structopt(short, long, default_value = "50x50")]
+	#[structopt(short, long, default_value = "50x50", help = "The size of the output image")]
 	output_size: OutputSize,
-	#[structopt(short, long, default_value = "1000")]
-	iterations: usize,
+	#[structopt(short, long, default_value = "1000", help = "The number of times to try and make a valid tilemap")]
+	attempts: NonZeroUsize,
+	#[structopt(help = "The output image file")]
 	output_image: PathBuf,
 }
 
@@ -197,9 +209,19 @@ fn main() -> Result<(), anyhow::Error> {
 
 	let opt = Opt::from_args();
 
-	let input: InputParams = ron::de::from_reader(std::fs::File::open(opt.input_config)?)?;
+	let file = std::fs::File::open(&opt.input_config)
+		.map_err(|err| anyhow::anyhow!("Could not open '{}': {}", opt.input_config.display(), err))?;
 
-	let tileset_image = image::open(&input.tileset_image_path)?;
+	let input: InputParams = ron::de::from_reader(file)
+		.map_err(|err| anyhow::anyhow!("Failed to parse '{}': {}", opt.input_config.display(), err))?;
+
+	let tileset_image_path = opt.input_config.parent()
+		// We already establised that the input_config path is a file, not a directory.
+		.unwrap_or_else(|| unreachable!())
+		.join(&input.tileset_image_path);
+
+	let tileset_image = image::open(&tileset_image_path)
+		.map_err(|err| anyhow::anyhow!("Could not open '{}': {}", tileset_image_path.display(), err))?;
 
 	let mut tile_labels = Vec::new();
 
@@ -227,8 +249,8 @@ fn main() -> Result<(), anyhow::Error> {
 
 	let mut map: HashMap<TileLabel, HashMap<Direction, HashSet<TileLabel>>> = HashMap::new();
 
-	let mut additions = 0;
-	let mut commutative_additions = 0;
+	let mut explicit_rules = 0;
+	let mut commutive_rules = 0;
 
 	for tile in &tile_labels {
 		for (direction, neighbour_tile) in input.allowed_neighbours(&tile) {
@@ -237,9 +259,9 @@ fn main() -> Result<(), anyhow::Error> {
 				.entry(direction)
 				.or_insert_with(HashSet::new);
 
-			log::debug!("Adding {:?} to the {:?} of {:?}", neighbour_tile, direction, tile);
+			log::debug!("Adding rule: {:?} to the {:?} of {:?}", neighbour_tile, direction, tile);
 			if hashset.insert(neighbour_tile) {
-				additions += 1;
+				explicit_rules += 1;
 			}
 		}
 	}
@@ -253,20 +275,26 @@ fn main() -> Result<(), anyhow::Error> {
 				.insert(tile.clone());
 
 			if added {
-				log::debug!("Commutatively adding {:?} to the {:?} of {:?}", tile, direction.opposite(), neighbour_tile);
-				commutative_additions += 1;
+				log::debug!(
+					"Commutatively adding rule: {:?} to the {:?} of {:?}",
+					tile, direction.opposite(), neighbour_tile,
+				);
+				commutive_rules += 1;
 			}
 		}
 	}
 
-	log::info!("Additions: {}, Commutive additions: {}", additions, commutative_additions);
+	log::info!(
+		"Explicit generated rules: {}, Commutively generated rules: {}",
+		explicit_rules, commutive_rules,
+	);
 
 	let pattern_table = wfc::PatternTable::from_vec(
 		tile_labels
 			.iter()
 			.map(|label| (label, &input.tiles[&label.label.to_string()]))
 			.map(|(label, tile)| wfc::PatternDescription {
-				weight: std::num::NonZeroU32::new(tile.weight),
+				weight: NonZeroU32::new(tile.weight),
 				allowed_neighbours: direction::CardinalDirectionTable::new_array([
 					map[label][&Direction::North].iter().map(label_to_u32).collect(),
 					map[label][&Direction::East].iter().map(label_to_u32).collect(),
@@ -281,15 +309,15 @@ fn main() -> Result<(), anyhow::Error> {
 	let global_stats = wfc::GlobalStats::new(pattern_table);
 
 	let rb = wfc::RunOwn::new(
-		wfc::Size::new_u16(opt.output_size.width, opt.output_size.height),
+		wfc::Size::new_u16(opt.output_size.width.get(), opt.output_size.height.get()),
 		&global_stats,
 		&mut rng
 	);
 
 	#[cfg(feature = "parallel")]
-	let retry = wfc::retry::ParNumTimes(opt.iterations);
+	let retry = wfc::retry::ParNumTimes(opt.attempts.get());
 	#[cfg(not(feature = "parallel"))]
-	let retry = wfc::retry::NumTimes(opt.iterations);
+	let retry = wfc::retry::NumTimes(opt.attempts.get());
 
 	let wave = rb.collapse_retrying(retry, &mut rng)
 		.map_err(|wfc::PropagateError::Contradiction(c)| {
@@ -297,7 +325,15 @@ fn main() -> Result<(), anyhow::Error> {
 			let north = c.north.map(|id| &tile_labels[id as usize]);
 			let south = c.south.map(|id| &tile_labels[id as usize]);
 			let east = c.east.map(|id| &tile_labels[id as usize]);
-			anyhow::anyhow!("Contradiction occurred.\nNorth: {:?}\nEast: {:?}\nSouth: {:?}\nWest: {:?}", north, east, south, west)
+			anyhow::anyhow!(
+				"All {} attempts reached an situation where no tile could be placed in a coord.\
+				\nYou could try turning up the number of attempts with `--attempts`,\
+				\nTurning the output size down with `--output-size`,\
+				\nOr adding additional rules to account to resolve this situation.\
+				\nHere's what was in each position around the coord:\
+				\nNorth: {:?}\nEast: {:?}\nSouth: {:?}\nWest: {:?}",
+				opt.attempts, north, east, south, west,
+			)
 		})?;
 
 	let image = wave_to_image(
@@ -326,12 +362,17 @@ fn wave_to_image(
 			},
 			Err(wfc::ChosenPatternIdError::MultipleCompatiblePatterns(ids)) => {
 				let tile = &tile_labels[ids[0] as usize];
-				log::debug!("Got multiple patterns at ({}, {}): {:?}", x, y, ids.into_iter().map(|id| &tile_labels[id as usize]).collect::<Vec<_>>());
+				log::debug!(
+					"Got multiple patterns at ({}, {}): {:?}",
+					x, y, ids.into_iter().map(|id| &tile_labels[id as usize]).collect::<Vec<_>>(),
+				);
 				(coords(&tile.label), tile.rotation)
 			},
 			_ => unreachable!()
 		};
-		let image = tileset_image.view(coord_x * tile_size, coord_y * tile_size, tile_size, tile_size);
+		let image = tileset_image.view(
+			coord_x * tile_size, coord_y * tile_size, tile_size, tile_size,
+		);
 
 		let image = match rotation {
 			Rotation::Normal => image.to_image(),

@@ -1,5 +1,5 @@
 (
-	tileset_image_path: "path_tiles.png",
+	tileset_image_path: "rivers_and_roads.png",
 	tile_size: 16,
 	tiles: {
 		"grass": (
