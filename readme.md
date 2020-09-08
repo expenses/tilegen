@@ -8,19 +8,23 @@ A CLI program to generate tilemaps using
 tilegen 0.1.0
 
 USAGE:
-	tilegen [OPTIONS] <input-config> <output-image>
+    tilegen [OPTIONS] <input-config> <SUBCOMMAND>
 
 FLAGS:
-	-h, --help       Prints help information
-	-V, --version    Prints version information
+    -h, --help       Prints help information
+    -V, --version    Prints version information
 
 OPTIONS:
-	-a, --attempts <attempts>          The number of times to try and make a valid tilemap [default: 1000]
-	-o, --output-size <output-size>    The size of the output image [default: 50x50]
+    -a, --attempts <attempts>    The number of times to try and make a valid tilemap. [default: 1000]
+    -m, --map-size <map-size>    The size of the generated tilemap. [default: 50x50]
 
 ARGS:
-	<input-config>    The input configuration file
-	<output-image>    The output image file
+    <input-config>    The input configuration file.
+
+SUBCOMMANDS:
+    generate-image      Generate a tilemap, convert it into an image and save it to a file
+    generate-tilemap    Generate a tilemap and save it to a file
+    help                Prints this message or the help of the given subcommand(s)
 ```
 
 `tilegen` takes a [Rust Object Notation](https://github.com/ron-rs/ron) configuration file as input.
@@ -70,7 +74,7 @@ This file sets up the rendering infomation and neighbour rules between tiles. He
 
 Run with:
 ```
-cargo run --release -- examples/simple.ron simple_generated.png
+cargo run --release -- examples/simple.ron generate-image simple_generated.png
 ```
 
 You should end up with something like this:

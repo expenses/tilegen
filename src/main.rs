@@ -7,13 +7,17 @@ use structopt::StructOpt;
 use std::fmt;
 use std::num::{NonZeroU16, NonZeroUsize, NonZeroU32};
 
-#[derive(Clone, PartialEq, Eq, Hash, serde::Deserialize, PartialOrd, Ord)]
+#[derive(Clone, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize, PartialOrd, Ord)]
 struct TileLabel {
 	label: String,
-	#[serde(default)]
+	#[serde(default, skip_serializing_if = "is_default")]
 	rotation: Rotation,
-	#[serde(default)]
+	#[serde(default, skip_serializing_if = "is_default")]
 	subsection: (u32, u32),
+}
+
+fn is_default<T: Default + PartialEq>(value: &T) -> bool {
+	value == &Default::default()
 }
 
 impl TileLabel {
@@ -36,7 +40,7 @@ impl fmt::Debug for TileLabel {
 	}
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Deserialize, Debug, PartialOrd, Ord)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize, Debug, PartialOrd, Ord)]
 enum Rotation {
 	Normal,
 	Minus90,
@@ -135,7 +139,7 @@ impl Default for Dimensions {
 #[derive(serde::Deserialize, Debug)]
 struct InputParams {
 	tileset_image_path: PathBuf,
-	tile_size: u32,
+	tile_size: NonZeroU32,
 	tiles: HashMap<String, Tile>,
 }
 
@@ -217,12 +221,26 @@ enum Symmetry {
 	I,
 }
 
-struct OutputSize {
+#[derive(StructOpt)]
+enum Subcommand {
+	/// Generate a tilemap and save it to a file.
+	GenerateTilemap {
+		#[structopt(help = "The path to save the generated tilemap to as a .ron.")]
+		path: PathBuf,
+	},
+	/// Generate a tilemap, convert it into an image and save it to a file.
+	GenerateImage {
+		#[structopt(help = "The path to save the generated image to as a .png.")]
+		path: PathBuf,
+	}
+}
+
+struct MapSize {
 	width: NonZeroU16,
 	height: NonZeroU16,
 }
 
-impl std::str::FromStr for OutputSize {
+impl std::str::FromStr for MapSize {
 	type Err = String;
 
 	fn from_str(string: &str) -> Result<Self, Self::Err> {
@@ -235,13 +253,13 @@ impl std::str::FromStr for OutputSize {
 
 #[derive(StructOpt)]
 struct Opt {
-	#[structopt(help = "The input configuration file")]
+	#[structopt(help = "The input configuration file.")]
 	input_config: PathBuf,
-	#[structopt(help = "The output image file")]
-	output_image: PathBuf,
-	#[structopt(short, long, default_value = "50x50", help = "The size of the output image")]
-	output_size: OutputSize,
-	#[structopt(short, long, default_value = "1000", help = "The number of times to try and make a valid tilemap")]
+	#[structopt(subcommand)]
+	subcommand: Subcommand,
+	#[structopt(short, long, default_value = "50x50", help = "The size of the generated tilemap.")]
+	map_size: MapSize,
+	#[structopt(short, long, default_value = "1000", help = "The number of times to try and make a valid tilemap.")]
 	attempts: NonZeroUsize,
 }
 
@@ -294,8 +312,6 @@ fn main() -> Result<(), anyhow::Error> {
 		tile_labels.iter().enumerate().find(|(_, lb)| lb == &label).map(|(i, _)| i)
 			.unwrap_or_else(|| panic!("Could not find {:?}", label)) as u32
 	};
-
-	let tile_size = input.tile_size;
 
 	let mut map: HashMap<TileLabel, HashMap<Direction, HashSet<TileLabel>>> = HashMap::new();
 
@@ -359,7 +375,7 @@ fn main() -> Result<(), anyhow::Error> {
 	let global_stats = wfc::GlobalStats::new(pattern_table);
 
 	let rb = wfc::RunOwn::new(
-		wfc::Size::new_u16(opt.output_size.width.get(), opt.output_size.height.get()),
+		wfc::Size::new_u16(opt.map_size.width.get(), opt.map_size.height.get()),
 		&global_stats,
 		&mut rng
 	);
@@ -386,49 +402,66 @@ fn main() -> Result<(), anyhow::Error> {
 			)
 		})?;
 
-	let image = wave_to_image(
-		wave, tile_size, &tile_labels, &tileset_image,
-		|label| {
-			let (x, y) = input.tiles[&label.label].coords;
-			let (sub_x, sub_y) = label.subsection;
-			(x + sub_x, y + sub_y)
-		},
-	);
+	let grid = wave_to_grid(&wave, &tile_labels);
 
-	image.save(opt.output_image)?;
+	match opt.subcommand {
+		Subcommand::GenerateTilemap { path } => {
+			let file = std::fs::File::create(path)?;
+			ron::ser::to_writer(file, &grid)?;
+		},
+		Subcommand::GenerateImage { path } => {
+			let image = grid_to_image(
+				&grid, input.tile_size.get(), &tileset_image,
+				|label| {
+					let (x, y) = input.tiles[&label.label].coords;
+					let (sub_x, sub_y) = label.subsection;
+					(x + sub_x, y + sub_y)
+				},
+			);
+
+			image.save_with_format(path, image::ImageFormat::Png)?;
+		}
+	}
+
 	Ok(())
 }
 
-fn wave_to_image(
-	wave: wfc::Wave,
-	tile_size: u32,
+fn wave_to_grid(
+	wave: &wfc::Wave,
 	tile_labels: &[TileLabel],
-	tileset_image: &DynamicImage,
-	coords: impl Fn(&TileLabel) -> (u32, u32),
-) -> DynamicImage {
-	let size = wave.grid().size();
-	let mut rgba_image = image::RgbaImage::new(size.width() * tile_size, size.height() * tile_size);
-	wave.grid().enumerate().for_each(|(wfc::Coord { x, y }, cell)| {
-		let ((coord_x, coord_y), rotation) = match cell.chosen_pattern_id() {
-			Ok(id) => {
-				let tile = &tile_labels[id as usize];
-				(coords(&tile), tile.rotation)
-			},
+) -> grid_2d::Grid<TileLabel> {
+	grid_2d::Grid::new_grid_map_ref_with_coord(wave.grid(), |wfc::Coord { x, y }, cell| {
+		match cell.chosen_pattern_id() {
+			Ok(id) => tile_labels[id as usize].clone(),
 			Err(wfc::ChosenPatternIdError::MultipleCompatiblePatterns(ids)) => {
-				let tile = &tile_labels[ids[0] as usize];
+				let tile = tile_labels[ids[0] as usize].clone();
 				log::debug!(
 					"Got multiple patterns at ({}, {}): {:?}",
 					x, y, ids.into_iter().map(|id| &tile_labels[id as usize]).collect::<Vec<_>>(),
 				);
-				(coords(&tile), tile.rotation)
+				tile
 			},
 			_ => unreachable!()
-		};
+		}
+	})
+}
+
+fn grid_to_image(
+	grid: &grid_2d::Grid<TileLabel>,
+	tile_size: u32,
+	tileset_image: &DynamicImage,
+	coords: impl Fn(&TileLabel) -> (u32, u32),
+) -> image::RgbaImage {
+	let size = grid.size();
+	let mut rgba_image = image::RgbaImage::new(size.width() * tile_size, size.height() * tile_size);
+	grid.enumerate().for_each(|(wfc::Coord { x, y }, label)| {
+		let (coord_x, coord_y) = coords(label);
+
 		let image = tileset_image.view(
 			coord_x * tile_size, coord_y * tile_size, tile_size, tile_size,
 		);
 
-		let image = match rotation {
+		let image = match label.rotation {
 			Rotation::Normal => image.to_image(),
 			Rotation::Plus90 => image::imageops::rotate90(&image),
 			Rotation::Opposite => image::imageops::rotate180(&image),
@@ -444,5 +477,5 @@ fn wave_to_image(
 			image_x as u32, image_y as u32,
 		)
 	});
-	DynamicImage::ImageRgba8(rgba_image)
+	rgba_image
 }
