@@ -12,12 +12,16 @@
 		"path": (
 			weight: 50,
 			coords: (1, 0),
+			// Whether the tile is rotatable or not, and it's symmetry type. When a tile is rotated,
+			// the direction of the allowed neighbours are naturally rotated too, so here a path
+			// will have to join onto another path tile and not a grass tile. Because it has `I`
+			// symmetry though, a path tile can match with a path tile rotated 180 degrees.
 			rotatable: Yes(symmetry: I),
 			allowed_neighbours: {
 				Up: [(label: "path")],
 				Down: [(label: "path")],
-				Left: [(label: "grass")],
-				Right: [(label: "grass")]
+				Left: [(label: "grass"), (label: "tree")],
+				Right: [(label: "grass"), (label: "tree")]
 			}
 		),
 		"river": (
@@ -38,6 +42,8 @@
 			allowed_neighbours: {
 				Up: [(label: "path")],
 				Down: [(label: "path")],
+				// By default, each tile reference is to the a regularly rotated tile, but here we
+				// refer to a river tile rotated by 90 degrees.
 				Left: [(label: "river", rotation: Plus90)],
 				Right: [(label: "river", rotation: Plus90)]
 			}
@@ -55,6 +61,7 @@
 		"river_bend": (
 			weight: 10,
 			coords: (1, 1),
+			// This river bend is rotatable but has no symmetry.
 			rotatable: Yes(symmetry: None),
 			allowed_neighbours: {
 				Up: [(label: "grass")],
@@ -181,16 +188,5 @@
 				All: [(label: "mountains")]
 			}
 		)
-		/*"cottage": (
-			weight: 0,
-			coords: (4, 1),
-			rotatable: true,
-			allowed_neighbours: {
-				Down: [(label: "path")],
-				Left: [(label: "grass")],
-				Right: [(label: "grass")],
-				Up: [(label: "grass")],
-			}
-		)*/
 	},
 )
