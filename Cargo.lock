@@ -652,7 +652,7 @@ checksum = "cccddf32554fecc6acb585f82a32a72e28b48f8c4c1883ddfeeeaa96f7d8e519"
 [[package]]
 name = "wfc"
 version = "0.9.1"
-source = "git+https://github.com/expenses/wfc?branch=easier-debugging#e29d69181956e67b378ed12ab98bc827884c6a58"
+source = "git+https://github.com/expenses/wfc?branch=easier-debugging#791fc3931d32c52a98b7709dbdd7214b3adef1e1"
 dependencies = [
  "coord_2d",
  "direction",
