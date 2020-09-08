@@ -261,6 +261,8 @@ struct Opt {
 	map_size: MapSize,
 	#[structopt(short, long, default_value = "1000", help = "The number of times to try and make a valid tilemap.")]
 	attempts: NonZeroUsize,
+	#[structopt(short, long, help = "The path to save an image to help in the event of a contradiction.")]
+	contradiction_image_path: Option<PathBuf>
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -395,22 +397,66 @@ fn main() -> Result<(), anyhow::Error> {
 	#[cfg(not(feature = "parallel"))]
 	let retry = wfc::retry::NumTimes(opt.attempts.get());
 
-	let wave = rb.collapse_retrying(retry, &mut rng)
-		.map_err(|wfc::PropagateError::Contradiction(c)| {
-			let west = c.west.map(|id| &tile_refs[id as usize]);
-			let north = c.north.map(|id| &tile_refs[id as usize]);
-			let south = c.south.map(|id| &tile_refs[id as usize]);
-			let east = c.east.map(|id| &tile_refs[id as usize]);
-			anyhow::anyhow!(
-				"All {} attempts reached an situation where no tile could be placed in a coord.\
+	let wave = match rb.collapse_retrying(retry, &mut rng) {
+		Ok(wave) => wave,
+		Err(wfc::PropagateError::Contradiction(c)) => {
+			let possible_patterns = |contradiction_tile| {
+				match contradiction_tile {
+					wfc::ContradictionTile::ChosenPattern(id) => vec![&tile_refs[id as usize]],
+					wfc::ContradictionTile::OffGrid | wfc::ContradictionTile::NoCompatiblePatterns => vec![],
+					wfc::ContradictionTile::MultipleCompatiblePatterns(ids) => ids.iter().map(|&id| &tile_refs[id as usize]).collect()
+				}
+			};
+
+			let west = possible_patterns(c.west);
+			let north = possible_patterns(c.north);
+			let south = possible_patterns(c.south);
+			let east = possible_patterns(c.east);
+
+			if let Some(path) = opt.contradiction_image_path {
+				let tile_size = input.tile_size.get();
+				let size = 3 * tile_size;
+				let mut image = image::RgbaImage::new(size, size);
+
+				image::imageops::overlay(
+					&mut image,
+					&merge_tiles(&input, &north, &tileset_image),
+					tile_size, 0,
+				);
+
+				image::imageops::overlay(
+					&mut image,
+					&merge_tiles(&input, &west, &tileset_image),
+					0, tile_size,
+				);
+
+				image::imageops::overlay(
+					&mut image,
+					&merge_tiles(&input, &east, &tileset_image),
+					tile_size * 2, tile_size,
+				);
+
+				image::imageops::overlay(
+					&mut image,
+					&merge_tiles(&input, &south, &tileset_image),
+					tile_size, tile_size * 2,
+				);
+
+				image.save_with_format(path, image::ImageFormat::Png)?;
+			}
+
+			return Err(anyhow::anyhow!(
+				"A contradiction has been reached. This means that all {} attempts reached an\
+				\nsituation where no tile could be placed in a coord.\
 				\nYou could try turning up the number of attempts with `--attempts`,\
 				\nTurning the map size down with `--map-size`,\
 				\nOr adding additional rules to account to resolve this situation.\
 				\nHere's what was in each position around the coord:\
 				\nNorth: {:?}\nEast: {:?}\nSouth: {:?}\nWest: {:?}",
 				opt.attempts, north, east, south, west,
-			)
-		})?;
+			));
+		}
+	};
 
 	let grid = wave_to_grid(&wave, &tile_refs);
 
@@ -420,14 +466,7 @@ fn main() -> Result<(), anyhow::Error> {
 			ron::ser::to_writer(file, &grid)?;
 		},
 		Subcommand::GenerateImage { path } => {
-			let image = grid_to_image(
-				&grid, input.tile_size.get(), &tileset_image,
-				|reference| {
-					let (x, y) = input.tiles[&reference.label].coords;
-					let (sub_x, sub_y) = reference.subsection;
-					(x + sub_x, y + sub_y)
-				},
-			);
+			let image = grid_to_image(&grid, &input, &tileset_image);
 
 			image.save_with_format(path, image::ImageFormat::Png)?;
 		}
@@ -458,25 +497,14 @@ fn wave_to_grid(
 
 fn grid_to_image(
 	grid: &grid_2d::Grid<TileReference>,
-	tile_size: u32,
+	input: &InputParams,
 	tileset_image: &DynamicImage,
-	coords: impl Fn(&TileReference) -> (u32, u32),
 ) -> image::RgbaImage {
 	let size = grid.size();
+	let tile_size = input.tile_size.get();
 	let mut rgba_image = image::RgbaImage::new(size.width() * tile_size, size.height() * tile_size);
 	grid.enumerate().for_each(|(wfc::Coord { x, y }, reference)| {
-		let (coord_x, coord_y) = coords(reference);
-
-		let image = tileset_image.view(
-			coord_x * tile_size, coord_y * tile_size, tile_size, tile_size,
-		);
-
-		let image = match reference.rotation {
-			Rotation::Normal => image.to_image(),
-			Rotation::Plus90 => image::imageops::rotate90(&image),
-			Rotation::Opposite => image::imageops::rotate180(&image),
-			Rotation::Minus90 => image::imageops::rotate270(&image)
-		};
+		let image = tile_to_image(input, reference, tileset_image);
 
 		let image_x = x * tile_size as i32;
 		let image_y = y * tile_size as i32;
@@ -488,4 +516,58 @@ fn grid_to_image(
 		)
 	});
 	rgba_image
+}
+
+fn tile_to_image(input: &InputParams, reference: &TileReference, tileset_image: &DynamicImage) -> RgbaImage {
+	let (coord_x, coord_y) = {
+		let (x, y) = input.tiles[&reference.label].coords;
+		let (sub_x, sub_y) = reference.subsection;
+		(x + sub_x, y + sub_y)
+	};
+	let tile_size = input.tile_size.get();
+
+	let image = tileset_image.view(
+		coord_x * tile_size, coord_y * tile_size, tile_size, tile_size,
+	);
+
+	match reference.rotation {
+		Rotation::Normal => image.to_image(),
+		Rotation::Plus90 => image::imageops::rotate90(&image),
+		Rotation::Opposite => image::imageops::rotate180(&image),
+		Rotation::Minus90 => image::imageops::rotate270(&image)
+	}
+}
+
+fn merge_tiles(input: &InputParams, references: &[&TileReference], tileset_image: &DynamicImage) -> RgbaImage {
+	let tile_size = input.tile_size.get();
+
+	let mut grid: grid_2d::Grid<(u32, u32, u32, u32)> = grid_2d::Grid::new_fn(grid_2d::Size::new(tile_size, tile_size), |_| (0, 0, 0, 0));
+
+	let mut image = RgbaImage::new(tile_size, tile_size);
+
+	if references.is_empty() {
+		return image;
+	}
+
+	for reference in references {
+		let image = tile_to_image(input, reference, tileset_image);
+
+		grid.enumerate_mut().for_each(|(grid_2d::Coord {x, y}, (r_v, g_v, b_v, a_v))| {
+			let &image::Rgba([r, g, b, a]) = image.get_pixel(x as u32, y as u32);
+
+			let (r, g, b, a) = (r as u32, g as u32, b as u32, a as u32);
+
+			*r_v += r * a;
+			*g_v += g * a;
+			*b_v += b * a;
+			*a_v = (*a_v).max(a);
+		});
+	}
+
+	grid.enumerate().for_each(|(grid_2d::Coord {x, y}, (r, g, b, a))| {
+		let div = references.len() as u32 * 255;
+		image.put_pixel(x as u32, y as u32, image::Rgba([(r / div) as u8, (g / div) as u8, (b / div) as u8, *a as u8]))
+	});
+
+	image
 }
