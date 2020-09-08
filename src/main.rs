@@ -8,7 +8,7 @@ use std::fmt;
 use std::num::{NonZeroU16, NonZeroUsize, NonZeroU32};
 
 #[derive(Clone, PartialEq, Eq, Hash, serde::Deserialize, serde::Serialize, PartialOrd, Ord)]
-struct TileLabel {
+struct TileReference {
 	label: String,
 	#[serde(default, skip_serializing_if = "is_default")]
 	rotation: Rotation,
@@ -20,7 +20,7 @@ fn is_default<T: Default + PartialEq>(value: &T) -> bool {
 	value == &Default::default()
 }
 
-impl TileLabel {
+impl TileReference {
 	fn new(label: &str, rotation: Rotation, subsection: (u32, u32)) -> Self {
 		Self {
 			label: label.to_string(),
@@ -29,7 +29,7 @@ impl TileLabel {
 	}
 }
 
-impl fmt::Debug for TileLabel {
+impl fmt::Debug for TileReference {
 	fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
 		match (self.rotation, self.subsection) {
 			(Rotation::Normal, (0, 0)) => write!(f, "{:?}", self.label),
@@ -120,7 +120,7 @@ struct Tile {
 	#[serde(default)]
 	rotatable: Rotatable,
 	#[serde(default)]
-	allowed_neighbours: HashMap<NeighbourDirection, Vec<TileLabel>>,
+	allowed_neighbours: HashMap<NeighbourDirection, Vec<TileReference>>,
 	weight: u32,
 	coords: (u32, u32),
 	#[serde(default)]
@@ -144,59 +144,59 @@ struct InputParams {
 }
 
 impl InputParams {
-	fn allowed_neighbours<'a>(&'a self, label: &'a TileLabel)
-		-> impl Iterator<Item=(Direction, TileLabel)> + 'a
+	fn allowed_neighbours<'a>(&'a self, reference: &'a TileReference)
+		-> impl Iterator<Item=(Direction, TileReference)> + 'a
 	{
-		// Get the allowed neighbours for a label
-		self.tiles[&label.label.to_string()].allowed_neighbours.iter()
+		// Get the allowed neighbours for a reference
+		self.tiles[&reference.label.to_string()].allowed_neighbours.iter()
 			// Flat map in the case of `NeighbourDirection::All`.
-			.flat_map(move |(direction, neighbour_labels)| {
-				direction.into_cardinal().iter().map(move |dir| (dir, neighbour_labels.clone()))
+			.flat_map(move |(direction, neighbour_refs)| {
+				direction.into_cardinal().iter().map(move |dir| (dir, neighbour_refs.clone()))
 			})
 			// Rewrite the neighbours of multi-sized tiles.
-			.map(move |(direction, neighbour_labels)| {
-				let Dimensions(width, height) = self.tiles[&label.label.to_string()].dimensions;
+			.map(move |(direction, neighbour_refs)| {
+				let Dimensions(width, height) = self.tiles[&reference.label.to_string()].dimensions;
 
-				match (direction, label.subsection, label.subsection.0 == width - 1, label.subsection.1 == height - 1) {
+				match (direction, reference.subsection, reference.subsection.0 == width - 1, reference.subsection.1 == height - 1) {
 					// No change
 					(Direction::North, (_, 0), _, _) | (Direction::West, (0, _), _, _) |
-					(Direction::East, _, true, _) | (Direction::South, _, _, true) => (direction, neighbour_labels),
+					(Direction::East, _, true, _) | (Direction::South, _, _, true) => (direction, neighbour_refs),
 
-					(Direction::North, (x, y), _, _) => (direction, vec![TileLabel::new(&label.label, Rotation::Normal, (x, y - 1))]),
-					(Direction::South, (x, y), _, _) => (direction, vec![TileLabel::new(&label.label, Rotation::Normal, (x, y + 1))]),
-					(Direction::West, (x, y), _, _) => (direction, vec![TileLabel::new(&label.label, Rotation::Normal, (x - 1, y))]),
-					(Direction::East, (x, y), _, _) => (direction, vec![TileLabel::new(&label.label, Rotation::Normal, (x + 1, y))]),
+					(Direction::North, (x, y), _, _) => (direction, vec![TileReference::new(&reference.label, Rotation::Normal, (x, y - 1))]),
+					(Direction::South, (x, y), _, _) => (direction, vec![TileReference::new(&reference.label, Rotation::Normal, (x, y + 1))]),
+					(Direction::West, (x, y), _, _) => (direction, vec![TileReference::new(&reference.label, Rotation::Normal, (x - 1, y))]),
+					(Direction::East, (x, y), _, _) => (direction, vec![TileReference::new(&reference.label, Rotation::Normal, (x + 1, y))]),
 				}
 			})
-			// Rotate the direction by the label direction.
-			.map(move |(dir, neighbour_labels)| (label.rotation.rotate(*dir), neighbour_labels))
-			// Flatmap to neighbour labels
-			.flat_map(move |(direction, neighbour_labels)| {
-				neighbour_labels.clone().into_iter()
-					.map(move |neighbour_label| (direction, neighbour_label))
+			// Rotate the direction by the reference direction.
+			.map(move |(dir, neighbour_refs)| (reference.rotation.rotate(*dir), neighbour_refs))
+			// Flatmap to neighbour reference
+			.flat_map(move |(direction, neighbour_refs)| {
+				neighbour_refs.clone().into_iter()
+					.map(move |neighbour_ref| (direction, neighbour_ref))
 			})
-			// Rotating neighbour labels if the can be rotated.
-			.map(move |(direction, mut neighbour_label)| {
-				match self.tiles[&neighbour_label.label.to_string()].rotatable {
+			// Rotating neighbour references if the can be rotated.
+			.map(move |(direction, mut neighbour_ref)| {
+				match self.tiles[&neighbour_ref.label.to_string()].rotatable {
 					Rotatable::Yes { .. } => {
-						neighbour_label.rotation =
-							neighbour_label.rotation.apply(label.rotation);
+						neighbour_ref.rotation =
+							neighbour_ref.rotation.apply(reference.rotation);
 					},
 					_ => {}
 				}
 
-				(direction, neighbour_label)
+				(direction, neighbour_ref)
 			})
 			// Apply symmetry.
-			.flat_map(move |(direction, neighbour_label)| {
-				match self.tiles[&neighbour_label.label.to_string()].rotatable {
+			.flat_map(move |(direction, neighbour_ref)| {
+				match self.tiles[&neighbour_ref.label.to_string()].rotatable {
 					Rotatable::Yes { symmetry: Symmetry::I } => {
-						let mut opposite_neighbour_label = neighbour_label.clone();
-						opposite_neighbour_label.rotation = opposite_neighbour_label.rotation.opposite();
-						vec![(direction, neighbour_label), (direction, opposite_neighbour_label)]
+						let mut opposite_neighbour_ref = neighbour_ref.clone();
+						opposite_neighbour_ref.rotation = opposite_neighbour_ref.rotation.opposite();
+						vec![(direction, neighbour_ref), (direction, opposite_neighbour_ref)]
 					},
 					Rotatable::Yes { symmetry: Symmetry::None } | Rotatable::No => {
-						vec![(direction, neighbour_label)]
+						vec![(direction, neighbour_ref)]
 					},
 				}
 			})
@@ -282,8 +282,8 @@ fn main() -> Result<(), anyhow::Error> {
 	let tileset_image = image::open(&tileset_image_path)
 		.map_err(|err| anyhow::anyhow!("Could not open '{}': {}", tileset_image_path.display(), err))?;
 
-	// Generate all possible tile labels.
-	let mut tile_labels: Vec<TileLabel> = input.tiles.iter()
+	// Generate all possible tile references.
+	let mut tile_refs: Vec<TileReference> = input.tiles.iter()
 		.flat_map(|(label, tile)| {
 			if let Rotatable::Yes { .. } = tile.rotatable {
 				vec![
@@ -303,22 +303,24 @@ fn main() -> Result<(), anyhow::Error> {
 				.flat_map(move |x| (0 .. height).map(move |y| (x, y)))
 				.map(move |(x, y)| (label, rotation, (x, y)))
 		})
-		.map(|(label, rotation, subsection)| TileLabel { label: label.into(), rotation, subsection})
+		.map(|(label, rotation, subsection)| TileReference { label: label.into(), rotation, subsection})
 		.collect();
 
-	tile_labels.sort_unstable();
+	log::info!("Expanded {} tiles in the input into {} tile references", input.tiles.len(), tile_refs.len());
 
-	let label_to_u32 =  |label: &TileLabel| -> u32 {
-		tile_labels.iter().enumerate().find(|(_, lb)| lb == &label).map(|(i, _)| i)
-			.unwrap_or_else(|| panic!("Could not find {:?}", label)) as u32
+	tile_refs.sort_unstable();
+
+	let ref_to_u32 =  |reference: &TileReference| -> u32 {
+		tile_refs.iter().enumerate().find(|(_, r)| r == &reference).map(|(i, _)| i)
+			.unwrap_or_else(|| panic!("Could not find {:?}", reference)) as u32
 	};
 
-	let mut map: HashMap<TileLabel, HashMap<Direction, HashSet<TileLabel>>> = HashMap::new();
+	let mut map: HashMap<TileReference, HashMap<Direction, HashSet<TileReference>>> = HashMap::new();
 
 	let mut explicit_rules = 0;
 	let mut commutive_rules = 0;
 
-	for tile in &tile_labels {
+	for tile in &tile_refs {
 		for (direction, neighbour_tile) in input.allowed_neighbours(&tile) {
 			let hashset = map.entry(tile.clone())
 				.or_insert_with(HashMap::new)
@@ -332,7 +334,7 @@ fn main() -> Result<(), anyhow::Error> {
 		}
 	}
 
-	for tile in &tile_labels {
+	for tile in &tile_refs {
 		for (direction, neighbour_tile) in input.allowed_neighbours(&tile) {
 			let added = map.entry(neighbour_tile.clone())
 				.or_insert_with(HashMap::new)
@@ -355,17 +357,25 @@ fn main() -> Result<(), anyhow::Error> {
 		explicit_rules, commutive_rules,
 	);
 
+	let get_ids_for_direction = |reference: &TileReference, direction: Direction| {
+		map.get(reference)
+			.unwrap_or_else(|| panic!("Can't find reference {:?}", reference))
+			.get(&direction)
+			.unwrap_or_else(|| panic!("{:?} has no neighbours in direction {:?}", reference, direction))
+			.iter().map(ref_to_u32).collect()
+	};
+
 	let pattern_table = wfc::PatternTable::from_vec(
-		tile_labels
+		tile_refs
 			.iter()
-			.map(|label| (label, &input.tiles[&label.label.to_string()]))
-			.map(|(label, tile)| wfc::PatternDescription {
+			.map(|reference| (reference, &input.tiles[&reference.label.to_string()]))
+			.map(|(reference, tile)| wfc::PatternDescription {
 				weight: NonZeroU32::new(tile.weight),
 				allowed_neighbours: direction::CardinalDirectionTable::new_array([
-					map[label][&Direction::North].iter().map(label_to_u32).collect(),
-					map[label][&Direction::East].iter().map(label_to_u32).collect(),
-					map[label][&Direction::South].iter().map(label_to_u32).collect(),
-					map[label][&Direction::West].iter().map(label_to_u32).collect(),
+					get_ids_for_direction(reference, Direction::North),
+					get_ids_for_direction(reference, Direction::East),
+					get_ids_for_direction(reference, Direction::South),
+					get_ids_for_direction(reference, Direction::West),
 				])
 			})
 			.collect()
@@ -387,14 +397,14 @@ fn main() -> Result<(), anyhow::Error> {
 
 	let wave = rb.collapse_retrying(retry, &mut rng)
 		.map_err(|wfc::PropagateError::Contradiction(c)| {
-			let west = c.west.map(|id| &tile_labels[id as usize]);
-			let north = c.north.map(|id| &tile_labels[id as usize]);
-			let south = c.south.map(|id| &tile_labels[id as usize]);
-			let east = c.east.map(|id| &tile_labels[id as usize]);
+			let west = c.west.map(|id| &tile_refs[id as usize]);
+			let north = c.north.map(|id| &tile_refs[id as usize]);
+			let south = c.south.map(|id| &tile_refs[id as usize]);
+			let east = c.east.map(|id| &tile_refs[id as usize]);
 			anyhow::anyhow!(
 				"All {} attempts reached an situation where no tile could be placed in a coord.\
 				\nYou could try turning up the number of attempts with `--attempts`,\
-				\nTurning the output size down with `--output-size`,\
+				\nTurning the map size down with `--map-size`,\
 				\nOr adding additional rules to account to resolve this situation.\
 				\nHere's what was in each position around the coord:\
 				\nNorth: {:?}\nEast: {:?}\nSouth: {:?}\nWest: {:?}",
@@ -402,7 +412,7 @@ fn main() -> Result<(), anyhow::Error> {
 			)
 		})?;
 
-	let grid = wave_to_grid(&wave, &tile_labels);
+	let grid = wave_to_grid(&wave, &tile_refs);
 
 	match opt.subcommand {
 		Subcommand::GenerateTilemap { path } => {
@@ -412,9 +422,9 @@ fn main() -> Result<(), anyhow::Error> {
 		Subcommand::GenerateImage { path } => {
 			let image = grid_to_image(
 				&grid, input.tile_size.get(), &tileset_image,
-				|label| {
-					let (x, y) = input.tiles[&label.label].coords;
-					let (sub_x, sub_y) = label.subsection;
+				|reference| {
+					let (x, y) = input.tiles[&reference.label].coords;
+					let (sub_x, sub_y) = reference.subsection;
 					(x + sub_x, y + sub_y)
 				},
 			);
@@ -428,16 +438,16 @@ fn main() -> Result<(), anyhow::Error> {
 
 fn wave_to_grid(
 	wave: &wfc::Wave,
-	tile_labels: &[TileLabel],
-) -> grid_2d::Grid<TileLabel> {
+	tile_refs: &[TileReference],
+) -> grid_2d::Grid<TileReference> {
 	grid_2d::Grid::new_grid_map_ref_with_coord(wave.grid(), |wfc::Coord { x, y }, cell| {
 		match cell.chosen_pattern_id() {
-			Ok(id) => tile_labels[id as usize].clone(),
+			Ok(id) => tile_refs[id as usize].clone(),
 			Err(wfc::ChosenPatternIdError::MultipleCompatiblePatterns(ids)) => {
-				let tile = tile_labels[ids[0] as usize].clone();
+				let tile = tile_refs[ids[0] as usize].clone();
 				log::debug!(
 					"Got multiple patterns at ({}, {}): {:?}",
-					x, y, ids.into_iter().map(|id| &tile_labels[id as usize]).collect::<Vec<_>>(),
+					x, y, ids.into_iter().map(|id| &tile_refs[id as usize]).collect::<Vec<_>>(),
 				);
 				tile
 			},
@@ -447,21 +457,21 @@ fn wave_to_grid(
 }
 
 fn grid_to_image(
-	grid: &grid_2d::Grid<TileLabel>,
+	grid: &grid_2d::Grid<TileReference>,
 	tile_size: u32,
 	tileset_image: &DynamicImage,
-	coords: impl Fn(&TileLabel) -> (u32, u32),
+	coords: impl Fn(&TileReference) -> (u32, u32),
 ) -> image::RgbaImage {
 	let size = grid.size();
 	let mut rgba_image = image::RgbaImage::new(size.width() * tile_size, size.height() * tile_size);
-	grid.enumerate().for_each(|(wfc::Coord { x, y }, label)| {
-		let (coord_x, coord_y) = coords(label);
+	grid.enumerate().for_each(|(wfc::Coord { x, y }, reference)| {
+		let (coord_x, coord_y) = coords(reference);
 
 		let image = tileset_image.view(
 			coord_x * tile_size, coord_y * tile_size, tile_size, tile_size,
 		);
 
-		let image = match label.rotation {
+		let image = match reference.rotation {
 			Rotation::Normal => image.to_image(),
 			Rotation::Plus90 => image::imageops::rotate90(&image),
 			Rotation::Opposite => image::imageops::rotate180(&image),
