@@ -1,9 +1,10 @@
 use image::*;
 use direction::CardinalDirection as Direction;
+use structopt::StructOpt;
+use grid_2d::*;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
-use structopt::StructOpt;
 use std::fmt;
 use std::num::{NonZeroU16, NonZeroUsize, NonZeroU32};
 
@@ -225,13 +226,24 @@ enum Symmetry {
 enum Subcommand {
 	/// Generate a tilemap and save it to a file.
 	GenerateTilemap {
+		#[structopt(flatten)]
+		generation_options: GenerationOptions,
 		#[structopt(help = "The path to save the generated tilemap to as a .ron.")]
 		path: PathBuf,
 	},
 	/// Generate a tilemap, convert it into an image and save it to a file.
 	GenerateImage {
+		#[structopt(flatten)]
+		generation_options: GenerationOptions,
 		#[structopt(help = "The path to save the generated image to as a .png.")]
 		path: PathBuf,
+	},
+	/// Render a generated tilemap to an image.
+	TilemapToImage {
+		#[structopt(help = "The path of the tilemap.")]
+		tilemap_path: PathBuf,
+		#[structopt(help = "The path of the rendered image.")]
+		image_path: PathBuf,
 	}
 }
 
@@ -252,17 +264,21 @@ impl std::str::FromStr for MapSize {
 }
 
 #[derive(StructOpt)]
-struct Opt {
-	#[structopt(help = "The input configuration file.")]
-	input_config: PathBuf,
-	#[structopt(subcommand)]
-	subcommand: Subcommand,
+struct GenerationOptions {
 	#[structopt(short, long, default_value = "50x50", help = "The size of the generated tilemap.")]
 	map_size: MapSize,
 	#[structopt(short, long, default_value = "1000", help = "The number of times to try and make a valid tilemap.")]
 	attempts: NonZeroUsize,
 	#[structopt(short, long, help = "The path to save an image to help in the event of a contradiction.")]
 	contradiction_image_path: Option<PathBuf>
+}
+
+#[derive(StructOpt)]
+struct Opt {
+	#[structopt(help = "The input configuration file.")]
+	input_config: PathBuf,
+	#[structopt(subcommand)]
+	subcommand: Subcommand,
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -284,6 +300,29 @@ fn main() -> Result<(), anyhow::Error> {
 	let tileset_image = image::open(&tileset_image_path)
 		.map_err(|err| anyhow::anyhow!("Could not open '{}': {}", tileset_image_path.display(), err))?;
 
+	match opt.subcommand {
+		Subcommand::GenerateTilemap { path, generation_options } => {
+			let grid = generate(&input, &tileset_image, &generation_options)?;
+			let file = std::fs::File::create(path)?;
+			ron::ser::to_writer(file, &grid)?;
+		},
+		Subcommand::GenerateImage { path, generation_options } => {
+			let grid = generate(&input, &tileset_image, &generation_options)?;
+			let image = grid_to_image(&grid, &input, &tileset_image);
+			image.save_with_format(path, image::ImageFormat::Png)?;
+		},
+		Subcommand::TilemapToImage { tilemap_path, image_path } => {
+			let tilemap_file = std::fs::File::open(tilemap_path)?;
+			let tilemap = ron::de::from_reader(tilemap_file)?;
+			let image = grid_to_image(&tilemap, &input, &tileset_image);
+			image.save_with_format(image_path, image::ImageFormat::Png)?;
+		}
+	}
+
+	Ok(())
+}
+
+fn generate(input: &InputParams, tileset_image: &DynamicImage, gen: &GenerationOptions) -> Result<Grid<TileReference>, anyhow::Error> {
 	// Generate all possible tile references.
 	let mut tile_refs: Vec<TileReference> = input.tiles.iter()
 		.flat_map(|(label, tile)| {
@@ -387,15 +426,15 @@ fn main() -> Result<(), anyhow::Error> {
 	let global_stats = wfc::GlobalStats::new(pattern_table);
 
 	let rb = wfc::RunOwn::new(
-		wfc::Size::new_u16(opt.map_size.width.get(), opt.map_size.height.get()),
+		wfc::Size::new_u16(gen.map_size.width.get(), gen.map_size.height.get()),
 		&global_stats,
 		&mut rng
 	);
 
 	#[cfg(feature = "parallel")]
-	let retry = wfc::retry::ParNumTimes(opt.attempts.get());
+	let retry = wfc::retry::ParNumTimes(gen.attempts.get());
 	#[cfg(not(feature = "parallel"))]
-	let retry = wfc::retry::NumTimes(opt.attempts.get());
+	let retry = wfc::retry::NumTimes(gen.attempts.get());
 
 	let wave = match rb.collapse_retrying(retry, &mut rng) {
 		Ok(wave) => wave,
@@ -413,7 +452,7 @@ fn main() -> Result<(), anyhow::Error> {
 			let south = possible_patterns(c.south);
 			let east = possible_patterns(c.east);
 
-			if let Some(path) = opt.contradiction_image_path {
+			if let Some(path) = gen.contradiction_image_path.as_ref() {
 				let tile_size = input.tile_size.get();
 				let size = 3 * tile_size;
 				let mut image = image::RgbaImage::new(size, size);
@@ -453,33 +492,19 @@ fn main() -> Result<(), anyhow::Error> {
 				\nOr adding additional rules to account to resolve this situation.\
 				\nHere's what was in each position around the coord:\
 				\nNorth: {:?}\nEast: {:?}\nSouth: {:?}\nWest: {:?}",
-				opt.attempts, north, east, south, west,
+				gen.attempts, north, east, south, west,
 			));
 		}
 	};
 
-	let grid = wave_to_grid(&wave, &tile_refs);
-
-	match opt.subcommand {
-		Subcommand::GenerateTilemap { path } => {
-			let file = std::fs::File::create(path)?;
-			ron::ser::to_writer(file, &grid)?;
-		},
-		Subcommand::GenerateImage { path } => {
-			let image = grid_to_image(&grid, &input, &tileset_image);
-
-			image.save_with_format(path, image::ImageFormat::Png)?;
-		}
-	}
-
-	Ok(())
+	Ok(wave_to_grid(&wave, &tile_refs))
 }
 
 fn wave_to_grid(
 	wave: &wfc::Wave,
 	tile_refs: &[TileReference],
-) -> grid_2d::Grid<TileReference> {
-	grid_2d::Grid::new_grid_map_ref_with_coord(wave.grid(), |wfc::Coord { x, y }, cell| {
+) -> Grid<TileReference> {
+	Grid::new_grid_map_ref_with_coord(wave.grid(), |wfc::Coord { x, y }, cell| {
 		match cell.chosen_pattern_id() {
 			Ok(id) => tile_refs[id as usize].clone(),
 			Err(wfc::ChosenPatternIdError::MultipleCompatiblePatterns(ids)) => {
@@ -496,7 +521,7 @@ fn wave_to_grid(
 }
 
 fn grid_to_image(
-	grid: &grid_2d::Grid<TileReference>,
+	grid: &Grid<TileReference>,
 	input: &InputParams,
 	tileset_image: &DynamicImage,
 ) -> image::RgbaImage {
@@ -541,7 +566,7 @@ fn tile_to_image(input: &InputParams, reference: &TileReference, tileset_image: 
 fn merge_tiles(input: &InputParams, references: &[&TileReference], tileset_image: &DynamicImage) -> RgbaImage {
 	let tile_size = input.tile_size.get();
 
-	let mut grid: grid_2d::Grid<(u32, u32, u32, u32)> = grid_2d::Grid::new_fn(grid_2d::Size::new(tile_size, tile_size), |_| (0, 0, 0, 0));
+	let mut grid: Grid<(u32, u32, u32, u32)> = Grid::new_fn(Size::new(tile_size, tile_size), |_| (0, 0, 0, 0));
 
 	let mut image = RgbaImage::new(tile_size, tile_size);
 
@@ -552,7 +577,7 @@ fn merge_tiles(input: &InputParams, references: &[&TileReference], tileset_image
 	for reference in references {
 		let image = tile_to_image(input, reference, tileset_image);
 
-		grid.enumerate_mut().for_each(|(grid_2d::Coord {x, y}, (r_v, g_v, b_v, a_v))| {
+		grid.enumerate_mut().for_each(|(Coord {x, y}, (r_v, g_v, b_v, a_v))| {
 			let &image::Rgba([r, g, b, a]) = image.get_pixel(x as u32, y as u32);
 
 			let (r, g, b, a) = (r as u32, g as u32, b as u32, a as u32);
@@ -564,7 +589,7 @@ fn merge_tiles(input: &InputParams, references: &[&TileReference], tileset_image
 		});
 	}
 
-	grid.enumerate().for_each(|(grid_2d::Coord {x, y}, (r, g, b, a))| {
+	grid.enumerate().for_each(|(Coord {x, y}, (r, g, b, a))| {
 		let div = references.len() as u32 * 255;
 		image.put_pixel(x as u32, y as u32, image::Rgba([(r / div) as u8, (g / div) as u8, (b / div) as u8, *a as u8]))
 	});

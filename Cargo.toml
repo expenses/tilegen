@@ -1,6 +1,6 @@
 [package]
 name = "tilegen"
-version = "0.2.1"
+version = "0.3.0"
 authors = ["Ashley Ruglys <ashley.ruglys@gmail.com>"]
 edition = "2018"
 

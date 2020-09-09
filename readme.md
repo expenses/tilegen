@@ -5,26 +5,23 @@ A CLI program to generate tilemaps using
 [wfc](https://crates.io/crates/wfc) crate.
 
 ```
-tilegen 0.1.0
+tilegen 0.3.0
 
 USAGE:
-    tilegen [OPTIONS] <input-config> <SUBCOMMAND>
+	tilegen <input-config> <SUBCOMMAND>
 
 FLAGS:
-    -h, --help       Prints help information
-    -V, --version    Prints version information
-
-OPTIONS:
-    -a, --attempts <attempts>    The number of times to try and make a valid tilemap. [default: 1000]
-    -m, --map-size <map-size>    The size of the generated tilemap. [default: 50x50]
+	-h, --help       Prints help information
+	-V, --version    Prints version information
 
 ARGS:
-    <input-config>    The input configuration file.
+	<input-config>    The input configuration file.
 
 SUBCOMMANDS:
-    generate-image      Generate a tilemap, convert it into an image and save it to a file
-    generate-tilemap    Generate a tilemap and save it to a file
-    help                Prints this message or the help of the given subcommand(s)
+	generate-image      Generate a tilemap, convert it into an image and save it to a file
+	generate-tilemap    Generate a tilemap and save it to a file
+	help                Prints this message or the help of the given subcommand(s)
+	tilemap-to-image    Render a generated tilemap to an image
 ```
 
 `tilegen` takes a [Rust Object Notation](https://github.com/ron-rs/ron) configuration file as input.
@@ -37,17 +34,18 @@ This file sets up the rendering infomation and neighbour rules between tiles. He
 	tileset_image_path: "rivers_and_roads.png",
 	// The size of an tile in the tileset. Here it's 16 pixels by 16 pixels.
 	tile_size: 16,
-	// A hashmap of tile ID strings to their configurations.
+	// A map of tile ID strings to their configurations.
 	tiles: {
 		"grass": (
-			// All tiles in this example have a 'weight' of 1, meaning that they're equally as
-			// likely to occur as each other.
+			// The relative likelyhood of this tile appearing. All tiles in this example have a
+			// 'weight' of 1, meaning that they're equally as likely to occur as each other.
 			weight: 1,
 			// The location of the tile in the tileset, from the top-left.
 			coords: (0, 0),
 			allowed_neighbours: {
 				// Here we say that this grass tile is allowed to neighbour with grass tiles in all
-				// directions.
+				// directions. `All` is just a short way of writing the same thing out for `Up`,
+				// `Right`, `Down`, and `Left`.
 				All: [(label: "grass")],
 			},
 		),
