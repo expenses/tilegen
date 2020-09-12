@@ -17,6 +17,7 @@ structopt = "0.3.17"
 anyhow = "1.0.32"
 grid_2d = { version = "0.14.6", features = ["serialize"] }
 itertools = "0.9.0"
+rand_xorshift = "0.2.0"
 
 [features]
 default = ["parallel"]

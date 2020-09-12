@@ -617,6 +617,7 @@ dependencies = [
  "itertools",
  "log",
  "rand",
+ "rand_xorshift",
  "ron",
  "serde",
  "structopt",
