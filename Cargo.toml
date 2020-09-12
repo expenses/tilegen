@@ -9,13 +9,14 @@ wfc = { git = "https://github.com/expenses/wfc", branch = "easier-debugging" }
 image = { version = "0.23.9", default-features = false, features = ["png"] }
 direction = "0.17.10"
 rand = "0.7.3"
-serde = { version = "1.0.115", features = ["derive"] }
-ron = "0.6.1"
+serde = { version = "1.0.116", features = ["derive"] }
+ron = "0.6.2"
 env_logger = { version = "0.7.1", default-features = false, features = ["termcolor", "atty", "humantime"] }
 log = "0.4.11"
 structopt = "0.3.17"
 anyhow = "1.0.32"
 grid_2d = { version = "0.14.6", features = ["serialize"] }
+itertools = "0.9.0"
 
 [features]
 default = ["parallel"]

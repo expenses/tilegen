@@ -2,6 +2,7 @@ use image::*;
 use direction::CardinalDirection as Direction;
 use structopt::StructOpt;
 use grid_2d::*;
+use itertools::Itertools;
 
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -247,25 +248,21 @@ enum Subcommand {
 	}
 }
 
+fn parse_map_size(string: &str) -> Result<MapSize, anyhow::Error> {
+	let index = string.find("x").ok_or_else(|| anyhow::anyhow!("Missing 'x' seperator"))?;
+	let width = string[..index].parse::<NonZeroU16>()?;
+	let height = string[index+1..].parse::<NonZeroU16>()?;
+	Ok(MapSize { width, height })
+}
+
 struct MapSize {
 	width: NonZeroU16,
 	height: NonZeroU16,
 }
 
-impl std::str::FromStr for MapSize {
-	type Err = String;
-
-	fn from_str(string: &str) -> Result<Self, Self::Err> {
-		let index = string.find("x").ok_or_else(|| "Missing 'x' seperator")?;
-		let width = string[..index].parse::<NonZeroU16>().map_err(|err| err.to_string())?;
-		let height = string[index+1..].parse::<NonZeroU16>().map_err(|err| err.to_string())?;
-		Ok(Self { width, height })
-	}
-}
-
 #[derive(StructOpt)]
 struct GenerationOptions {
-	#[structopt(short, long, default_value = "50x50", help = "The size of the generated tilemap.")]
+	#[structopt(short, long, default_value = "50x50", parse(try_from_str = parse_map_size), help = "The size of the generated tilemap.")]
 	map_size: MapSize,
 	#[structopt(short, long, default_value = "1000", help = "The number of times to try and make a valid tilemap.")]
 	attempts: NonZeroUsize,
@@ -322,9 +319,9 @@ fn main() -> Result<(), anyhow::Error> {
 	Ok(())
 }
 
-fn generate(input: &InputParams, tileset_image: &DynamicImage, gen: &GenerationOptions) -> Result<Grid<TileReference>, anyhow::Error> {
-	// Generate all possible tile references.
-	let mut tile_refs: Vec<TileReference> = input.tiles.iter()
+// Generate all possible tile references.
+fn generate_all_tile_references(input: &InputParams) -> Vec<TileReference> {
+	let tile_refs: Vec<_> = input.tiles.iter()
 		.flat_map(|(label, tile)| {
 			if let Rotatable::Yes { .. } = tile.rotatable {
 				vec![
@@ -345,23 +342,21 @@ fn generate(input: &InputParams, tileset_image: &DynamicImage, gen: &GenerationO
 				.map(move |(x, y)| (label, rotation, (x, y)))
 		})
 		.map(|(label, rotation, subsection)| TileReference { label: label.into(), rotation, subsection})
+		.sorted()
 		.collect();
 
 	log::info!("Expanded {} tiles in the input into {} tile references", input.tiles.len(), tile_refs.len());
 
-	tile_refs.sort_unstable();
+	tile_refs
+}
 
-	let ref_to_u32 =  |reference: &TileReference| -> u32 {
-		tile_refs.iter().enumerate().find(|(_, r)| r == &reference).map(|(i, _)| i)
-			.unwrap_or_else(|| panic!("Could not find {:?}", reference)) as u32
-	};
-
+fn create_neighbour_map(input: &InputParams, tile_refs: &[TileReference]) -> HashMap<TileReference, HashMap<Direction, HashSet<TileReference>>> {
 	let mut map: HashMap<TileReference, HashMap<Direction, HashSet<TileReference>>> = HashMap::new();
 
 	let mut explicit_rules = 0;
 	let mut commutive_rules = 0;
 
-	for tile in &tile_refs {
+	for tile in tile_refs {
 		for (direction, neighbour_tile) in input.allowed_neighbours(&tile) {
 			let hashset = map.entry(tile.clone())
 				.or_insert_with(HashMap::new)
@@ -375,7 +370,7 @@ fn generate(input: &InputParams, tileset_image: &DynamicImage, gen: &GenerationO
 		}
 	}
 
-	for tile in &tile_refs {
+	for tile in tile_refs {
 		for (direction, neighbour_tile) in input.allowed_neighbours(&tile) {
 			let added = map.entry(neighbour_tile.clone())
 				.or_insert_with(HashMap::new)
@@ -397,6 +392,19 @@ fn generate(input: &InputParams, tileset_image: &DynamicImage, gen: &GenerationO
 		"Explicit generated rules: {}, Commutively generated rules: {}",
 		explicit_rules, commutive_rules,
 	);
+
+	map
+}
+
+fn generate(input: &InputParams, tileset_image: &DynamicImage, gen: &GenerationOptions) -> Result<Grid<TileReference>, anyhow::Error> {
+	let tile_refs = generate_all_tile_references(input);
+
+	let ref_to_u32 =  |reference: &TileReference| -> u32 {
+		tile_refs.iter().enumerate().find(|(_, r)| r == &reference).map(|(i, _)| i)
+			.unwrap_or_else(|| panic!("Could not find {:?}", reference)) as u32
+	};
+
+	let map = create_neighbour_map(input, &tile_refs);
 
 	let get_ids_for_direction = |reference: &TileReference, direction: Direction| {
 		map.get(reference)
