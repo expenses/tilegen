@@ -266,8 +266,11 @@ struct GenerationOptions {
 	map_size: MapSize,
 	#[structopt(short, long, default_value = "1000", help = "The number of times to try and make a valid tilemap.")]
 	attempts: NonZeroUsize,
-	#[structopt(short, long, help = "The path to save an image to help in the event of a contradiction.")]
-	contradiction_image_path: Option<PathBuf>
+	#[structopt(short, long, help = "The path to save an image to help in the event of a contradiction. By default an image will not be saved.")]
+	contradiction_image_path: Option<PathBuf>,
+	#[structopt(short, long, default_value = "None", parse(try_from_str = ron::de::from_str), help = "Which directions the map should wrap around in.")]
+	wrap: Wrap,
+
 }
 
 #[derive(StructOpt)]
@@ -276,6 +279,11 @@ struct Opt {
 	input_config: PathBuf,
 	#[structopt(subcommand)]
 	subcommand: Subcommand,
+}
+
+#[derive(serde::Deserialize, Debug)]
+enum Wrap {
+	None, Vertically, Horizontally, Both,
 }
 
 fn main() -> Result<(), anyhow::Error> {
@@ -433,9 +441,17 @@ fn generate(input: &InputParams, tileset_image: &DynamicImage, gen: &GenerationO
 	let mut rng = rand::thread_rng();
 	let global_stats = wfc::GlobalStats::new(pattern_table);
 
-	let rb = wfc::RunOwn::new(
+	let wrap = match gen.wrap {
+		Wrap::None => wfc::wrap::MultiWrap::None,
+		Wrap::Vertically => wfc::wrap::MultiWrap::Y,
+		Wrap::Horizontally => wfc::wrap::MultiWrap::X,
+		Wrap::Both => wfc::wrap::MultiWrap::XY,
+	};
+
+	let rb = wfc::RunOwn::new_wrap(
 		wfc::Size::new_u16(gen.map_size.width.get(), gen.map_size.height.get()),
 		&global_stats,
+		wrap,
 		&mut rng
 	);
 
